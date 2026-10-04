@@ -37,11 +37,21 @@
 
 ## 进度
 - [x] 调研 + 立项
-- [ ] data.js 数据表
-- [ ] 引擎五件套
-- [ ] verify.mjs 全绿
-- [ ] 浏览器冒烟+手机宽度截图
-- [ ] 部署 Pages + 导航主页 + 二维码 + 记忆
+- [x] data.js 数据表（90+物品/75+配方/32怪物/36建筑/14主线+8支线+36成就/12技能）
+- [x] 引擎五件套（world/render/entities/systems/ui + main）
+- [x] verify.mjs 618 项全绿（数据完整性/世界生成/全玩法链/存档回路）
+- [x] 浏览器冒烟：?test=panels 10面板全开✅ + ?test=play 8步玩法链✅（结果写 title 供 dump-dom）
+- [x] 三张截图目验（桌面/手机390/夜袭+建造面板），线上版复测零错误
+- [x] 部署 https://yjj0339.github.io/xinghuo-town/ （200+MIME✓）
+- [x] 导航主页最新卡片 + 二维码 qr-xinghuo.png
+- [x] 记忆已写
 
 ## 坑与教训（本项目新增）
-（待记）
+1. **UI 构造器传 null G 还在构造器里挂 G.toastFn** → 模块加载即崩（黑标题页）；构造器里的回调挂载必须判空，由装配层 wire() 再挂
+2. **背包 inv:[] 空数组** → addItem 的"找空位填入"循环永远不执行（length=0），初始物资/给料全部静默失败；固定槽位背包必须 `new Array(40).fill(null)`
+3. **气候纯噪声阈值** → 沙漠/火山/沼泽在坏种子下面积趋零；纬度气候带+噪声扰动+**稀有生态区保底印章**（可覆盖水面成半岛/岛）
+4. **印章打在湖里**（跳过水面 continue）→ 保底失效；印章应允许覆盖水面
+5. **gh api PUT 大文件**：index.html(60KB b64) 命令行传参 Argument list too long，**必须 --input json 文件**；且失败时下一条命令的成功输出会迷惑排障（逐条核对 commit 实际改动文件名）
+6. **Game 漏挂 this.pois**（只在 world.pois 里）→ 无头测试立功，浏览器也会崩；构造器把 world 的引用显式搬进来
+7. msedge --headless --dump-dom + 冒烟结果写 document.title = 免 CDP 的无头断言方案，可复用
+8. Git Bash /tmp 与 node 的 /tmp 不互通（node 解析成 E:\tmp）→ 临时文件放项目内用相对路径
