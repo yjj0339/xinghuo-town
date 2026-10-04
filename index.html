@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>星火小镇：荒谷拓荒记</title>
+<meta name="description" content="2.5D 开放世界生存经营游戏：建镇、种田、打怪、钓鱼、四季昼夜、四大Boss">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"></div>
+<div id="title"></div>
+<script>
+window.onerror = function (msg, src, line, col) {
+  var d = document.createElement('div');
+  d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#e05c5c;color:#fff;font:12px monospace;padding:6px;white-space:pre-wrap';
+  d.textContent = 'ERR ' + msg + ' @' + (src || '').split('/').pop() + ':' + line;
+  document.body.appendChild(d);
+};
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
