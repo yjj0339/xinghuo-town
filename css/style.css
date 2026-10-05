@@ -294,6 +294,16 @@ body {
 .title-card button:active { transform: translateY(3px); box-shadow: 0 1px 0 #D97A16; }
 .title-card button.ghost-btn { background: linear-gradient(180deg, #EEF2F6, #D9E1E9); box-shadow: 0 4px 0 #AAB6C2; color: #5C6470; font-weight: 600; font-size: 15px; }
 
+/* 订单 & 好感 & 强化 */
+.o-items { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 5px; }
+.o-item { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: #E05C4A; font-weight: 700; }
+.o-item.ok { color: #4FA82A; }
+.o-item img { width: 24px; height: 24px; }
+.hearts { font-size: 12px; letter-spacing: -1px; }
+.plus { color: #F2A03C; font-weight: 800; }
+.slot .pts { position: absolute; left: 2px; top: 1px; font-size: 9.5px; font-style: normal; color: #E86A9C; font-weight: 800; }
+.dptag { background: linear-gradient(90deg, #6A5A78, #4E4058); color: #FFE9C4; border-radius: 8px; padding: 1px 9px; font-weight: 700; }
+
 /* ---------- 手机适配 ---------- */
 @media (max-width: 720px) {
   #stats-card { min-width: 168px; transform: scale(.9); transform-origin: top left; }

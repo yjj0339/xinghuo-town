@@ -5,9 +5,10 @@ import {
   CONFIG, ITEMS, RECIPES, BUILDINGS, CROPS, MONSTERS, ANIMALS, WORLD_OBJECTS,
   MAIN_QUESTS, SIDE_QUESTS, DAILY_POOL, ACHIEVEMENTS, SKILLS, TOWN_LEVELS,
   MERCHANT, FISH_TABLE, BIOMES, NAMES, JOBS, RANDOM_EVENTS, PETS,
+  ORDER_POOL, DUNGEON, BOND_MILESTONES,
 } from './data.js';
 import { makeQueries } from './world.js';
-import { genWorld, mulberry32 } from './world.js';
+import { genWorld, genDungeon, mulberry32 } from './world.js';
 import {
   makePlayer, makeMonster, makeAnimal, makeNPC, updateMonster, updateAnimal, updateNPC,
   updateDrop, updateProjectile, playerAttack, xpNeed, addItem, countItem, removeItem,
@@ -51,6 +52,21 @@ export class Game {
     this.nightKillsPool = 0;
     this.buildCounts = {};
     this.version = CONFIG.VERSION;
+    // v8：商会订单 / 装备强化 / 矿洞
+    this.orders = [];
+    this.player.gearLv = this.player.gearLv || {};
+    this.inDungeon = 0; this.dungeonFloor = 0; this._ow = null;
+    // 矿洞入口 POI（荒野固定刷新）
+    {
+      let spot = null;
+      for (let k = 0; k < 200 && !spot; k++) {
+        const ang = this.rng() * Math.PI * 2, d = 15 + this.rng() * 11;
+        const x = Math.floor(this.townCenter.x + Math.cos(ang) * d), z = Math.floor(this.townCenter.z + Math.sin(ang) * d);
+        if (this.q.inBounds(x, z) && !this.q.isWater(x, z) && ['grass', 'forest', 'desert'].includes(this.q.biomeAt(x, z))) spot = { x, z };
+      }
+      if (!spot) spot = { x: this.world.center.x + 18, z: this.world.center.z };
+      this.pois.push({ type: 'mine', x: spot.x, z: spot.z, discovered: false });
+    }
     // 初始物资：刚好够做木斧+木镐，避免开局卡死
     addItem(this.player.inv, 'wood', 8); addItem(this.player.inv, 'fiber', 6); addItem(this.player.inv, 'berry', 3);
   }
@@ -156,13 +172,17 @@ export class Game {
   }
   playerDown() {
     const p = this.player; p.dead = true; p.hp = 0;
-    this.toast('你倒下了……醒来时已是清晨，损失了 20% 金币');
-    // 惩罚：金币损失，回到城镇中心
+    this.toast('你倒下了……醒来时损失了 20% 金币');
     p.coins = Math.floor(p.coins * .8);
-    p.x = this.townCenter.x; p.z = this.townCenter.z;
+    if (this.inDungeon) {
+      // 矿洞内倒下：回到本层入口，保留探索进度
+      p.x = this.world.pois[0].x + .5; p.z = this.world.pois[0].z + .5;
+      this.toast('⛏ 你在矿洞入口醒了过来');
+    } else {
+      p.x = this.townCenter.x; p.z = this.townCenter.z;
+    }
     p.hp = Math.max(30, p.maxHp * .4); p.hunger = Math.max(40, p.hunger); p.thirst = Math.max(40, p.thirst);
-    // 时间快进到早晨
-    if (this.phase === 'night') { this.dayTime = .02; this.day++; this.dayTime = .02; this.onNewDay(); }
+    if (this.phase === 'night' && !this.inDungeon) { this.dayTime = .02; this.day++; this.onNewDay(); }
     p.dead = false; p.fx.invuln = 3;
   }
   killMonster(m, from) {
@@ -427,6 +447,196 @@ export class Game {
     this.toast('🎒 背包已整理');
   }
 
+  // ---------- 商会订单 ----------
+  rollOrders() {
+    if (!this.buildings.some(b => b.id === 'notice_board')) return;
+    let guard = 0;
+    while (this.orders.length < 3 && guard++ < 10) this.orders.push(this.genOrder());
+  }
+  genOrder() {
+    const tiers = ORDER_POOL.filter(t => t.lv <= this.town.lv);
+    const tier = tiers[Math.floor(this.rng() * tiers.length)];
+    const kinds = 1 + (this.rng() < .4 ? 1 : 0);
+    const items = [];
+    let value = 0, cnt = 0;
+    for (let k = 0; k < kinds; k++) {
+      const [id, mn, mx] = tier.items[Math.floor(this.rng() * tier.items.length)];
+      if (items.some(x => x[0] === id)) continue;
+      const n = mn + Math.floor(this.rng() * (mx - mn + 1));
+      items.push([id, n]);
+      value += (ITEMS[id].p || 1) * n; cnt += n;
+    }
+    return { uid: 'o' + Math.floor(this.rng() * 1e9), items, coins: Math.ceil(value * 1.7) + this.town.lv * 4, xp: 15 + cnt * 2 };
+  }
+  orderHave(id) { return this.count(id) + this.storageCount(id); }
+  takeMixed(id, n) {
+    if (this.orderHave(id) < n) return false;
+    let need = n;
+    const fromInv = Math.min(this.count(id), need);
+    if (fromInv > 0) { this.take(id, fromInv); need -= fromInv; }
+    if (need > 0) this.takeStorage(id, need);
+    return true;
+  }
+  deliverOrder(uid) {
+    const o = this.orders.find(x => x.uid === uid);
+    if (!o) return false;
+    for (const [id, n] of o.items) {
+      if (this.orderHave(id) < n) { this.toast('货不够——背包不够可以存进小镇仓库凑数'); return false; }
+    }
+    for (const [id, n] of o.items) this.takeMixed(id, n);
+    this.orders = this.orders.filter(x => x.uid !== uid);
+    this.player.coins += o.coins;
+    this.gainXp(o.xp);
+    this.stats.orders_done = (this.stats.orders_done || 0) + 1;
+    this.sfx('coin');
+    this.toast(`📋 订单交付！+${o.coins} 金币`);
+    this.rollOrders();
+    return true;
+  }
+
+  // ---------- 好感度 ----------
+  addBond(npc, pts) {
+    const before = npc.bond || 0;
+    const after = Math.min(100, before + pts);
+    npc.bond = after;
+    for (const th of Object.keys(BOND_MILESTONES)) {
+      const t = +th;
+      if (before < t && after >= t) {
+        const m = BOND_MILESTONES[t];
+        if (m.coin) this.player.coins += m.coin;
+        if (m.skill) this.player.skillPts += m.skill;
+        if (m.gift) { const g = m.gift[Math.floor(this.rng() * m.gift.length)]; this.give(g[0], g[1]); }
+        if (m.item) this.give(m.item[0], m.item[1]);
+        if (t === 100) this.stats.bond_max = 1;
+        this.toast(`❤️ ${npc.name} 好感升华（${Math.round(t / 20)}❤️）：${m.d}`);
+        this.sfx('level');
+      }
+    }
+  }
+  giveGift(npcId, itemId) {
+    const npc = this.entities.find(e => e.id === npcId && e.kind === 'npc');
+    if (!npc) return false;
+    if (!this.take(itemId, 1)) { this.toast('背包里没有这件东西'); return false; }
+    const it = ITEMS[itemId];
+    const pts = it.c === 'food' ? 6 + Math.min(9, Math.round((it.p || 2) / 3)) : it.c === 'special' ? 10 : 3;
+    this.addBond(npc, pts);
+    this.stats.gifts_given = (this.stats.gifts_given || 0) + 1;
+    npc.say = { text: ['谢谢你！', '我正好想要这个！', '你太贴心了~'][Math.floor(this.rng() * 3)], t: 3.5 };
+    this.sfx('join');
+    return true;
+  }
+  talkNPC(npc) {
+    if (!npc.chatToday) {
+      npc.chatToday = true;
+      this.addBond(npc, 3);
+      this.toast(`💬 和${npc.name}聊了会儿天（好感 +3）`);
+    } else {
+      this.toast(`💬 ${npc.name}：今天聊够啦，明天再来~`);
+    }
+    npc.say = { text: ['今天也要加油！', '小镇有你真好。', '听说矿洞深处有亮晶晶的矿石……', '记得吃饱穿暖呀'][Math.floor(this.rng() * 4)], t: 3.5 };
+  }
+  bondCheer() {
+    let n = 0;
+    for (const e of this.entities) if (e.kind === 'npc' && (e.bond || 0) >= 20) n++;
+    return Math.min(.1, n * .02);
+  }
+
+  // ---------- 装备强化（+1~+5，属性每级+8%） ----------
+  strengthenGear(slot) {
+    const id = this.player.equip[slot];
+    if (!id) { this.toast('这个槽位还没有装备'); return false; }
+    const lv = this.player.gearLv[id] || 0;
+    if (lv >= 5) { this.toast('已经强化到 +5 满级了'); return false; }
+    const barId = (id.includes('iron') || id.includes('knight') || id.includes('spring')) ? 'bar_iron' : (id.includes('gold') ? 'bar_gold' : 'bar_copper');
+    const cost = 40 * (lv + 1);
+    if (!this.has(barId, 2) || this.player.coins < cost) { this.toast(`强化需要 ${ITEMS[barId].n}×2 + ${cost} 金币`); return false; }
+    this.take(barId, 2);
+    this.player.coins -= cost;
+    this.player.gearLv[id] = lv + 1;
+    if (lv + 1 >= 5) this.stats.str_max = 1;
+    this.sfx('craft');
+    this.toast(`🔨 ${ITEMS[id].n} 强化到 +${lv + 1}（属性 +${(lv + 1) * 8}%）`);
+    return true;
+  }
+
+  // ---------- 遗忘矿洞 ----------
+  enterMine() {
+    if (this.inDungeon) return false;
+    this._ow = {
+      world: this.world, q: this.q, pois: this.pois,
+      buildings: this.buildings, buildMap: this.buildMap,
+      entities: this.entities.filter(e => e.kind !== 'monster'),
+      px: this.player.x, pz: this.player.z,
+    };
+    this._loadDungeonFloor(1);
+    this.inDungeon = 1;
+    this.toast('⛏ 进入遗忘矿洞——可以挖穿岩壁开路，越深矿石越好！（矿洞内不自动存档）');
+    this.sfx('door');
+    return true;
+  }
+  _loadDungeonFloor(floor) {
+    const w = genDungeon(this.seed, floor, DUNGEON);
+    this.world = w;
+    this.q = makeQueries(w);
+    this.pois = w.pois;
+    this.buildings = [];
+    this.buildMap = new Map();
+    this.entities = this.entities.filter(e => e.kind === 'player');
+    this.drops = []; this.projectiles = []; this.meteors = [];
+    // 梯子周围清出落脚点
+    for (const p of w.pois) {
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const i = (p.z + dz) * w.W + (p.x + dx);
+        if (w.obj[i] && w.obj[i].id === 'dirt_wall') w.obj[i] = null;
+      }
+    }
+    this.player.x = w.pois[0].x + .5;
+    this.player.z = w.pois[0].z + .5;
+    // 跨世界瞬移：镜头直接吸附（不做全图飞行）
+    if (this.renderer) { this.renderer.cam.x = this.player.x; this.renderer.cam.z = this.player.z; }
+    this.dungeonFloor = floor;
+    this.stats.dungeon_best = Math.max(this.stats.dungeon_best || 0, floor);
+    this._spawnDungeonMonsters(floor);
+  }
+  _spawnDungeonMonsters(floor) {
+    const pool = DUNGEON.monPool(floor);
+    const n = DUNGEON.monCount(floor);
+    for (let k = 0; k < n; k++) {
+      for (let t = 0; t < 80; t++) {
+        const x = 2 + Math.floor(this.rng() * (this.world.W - 4)), z = 2 + Math.floor(this.rng() * (this.world.H - 4));
+        const o = this.world.obj[z * this.world.W + x];
+        if (!o && Math.hypot(x - this.player.x, z - this.player.z) > 7) {
+          this.entities.push(makeMonster(pool[Math.floor(this.rng() * pool.length)], x + .5, z + .5, { night: false, hpMul: 1 + floor * .12 }));
+          break;
+        }
+      }
+    }
+  }
+  changeFloor(dir) {
+    if (!this.inDungeon) return;
+    const nf = this.dungeonFloor + dir;
+    if (nf < 1) { this.exitMine(); return; }
+    if (nf > DUNGEON.maxFloor) { this.toast('这里已是矿洞最深处！'); return; }
+    this._loadDungeonFloor(nf);
+    this.toast(dir > 0 ? `⛏ 下到了矿洞第 ${nf} 层` : `回到矿洞第 ${nf} 层`);
+    this.sfx('door');
+  }
+  exitMine() {
+    if (!this.inDungeon) return;
+    const ow = this._ow;
+    this.world = ow.world; this.q = ow.q; this.pois = ow.pois;
+    this.buildings = ow.buildings; this.buildMap = ow.buildMap;
+    this.entities = ow.entities;
+    this.drops = []; this.projectiles = []; this.meteors = [];
+    this.player.x = ow.px; this.player.z = ow.pz;
+    if (this.renderer) { this.renderer.cam.x = this.player.x; this.renderer.cam.z = this.player.z; }
+    this.inDungeon = 0;
+    this._ow = null;
+    this.toast('🌅 回到了地面');
+    this.sfx('door');
+  }
+
+
   // ---------- 离线收益 ----------
   calcOffline() {
     const raw = localStorage.getItem(CONFIG.SAVE_KEY);
@@ -537,6 +747,9 @@ export class Game {
       case 'house_animal': return (s.house_animal || 0) >= goal.n;
       case 'sell_coins': return (s.sell_total || 0) >= goal.n;
       case 'ruin': return (s.ruins || 0) >= goal.n;
+      case 'dungeon': return (s.dungeon_best || 0) >= goal.n;
+      case 'order': return (s.orders_done || 0) >= goal.n;
+      case 'gift': return (s.gifts_given || 0) >= goal.n;
       case 'kill': return (s.kills || 0) >= goal.n;
       case 'harvest': return (s.harvest || 0) >= goal.n;
       case 'cook': return (s.cook || 0) >= goal.n;
@@ -788,7 +1001,7 @@ export class Game {
       }
     }
     // 商人
-    if (MERCHANT.visitDays.includes(this.day)) this.merchantArrive();
+    if (MERCHANT.visitDays.includes(this.day) && !this.inDungeon) this.merchantArrive();
     // 日常委托
     this.rollDailies();
     // 夜袭计划
@@ -799,8 +1012,11 @@ export class Game {
       this.toast(`🍂 ${SEASONS[newSeason]}天来了！`);
       for (const e of this.entities) if (e.kind === 'npc') e.happiness = Math.min(100, e.happiness + 10);
     }
-    // 随机事件
-    if (this.rng() < .4) this.randomEvent();
+    // 随机事件（矿洞内不触发）
+    if (this.rng() < .4 && !this.inDungeon) this.randomEvent();
+    // 商会订单刷新 + 居民每日闲聊重置
+    this.rollOrders();
+    for (const e of this.entities) if (e.kind === 'npc') e.chatToday = false;
     // 成就/存档
     this.checkAch();
     this.save(true);
@@ -994,7 +1210,7 @@ export class Game {
     else if (t < .5) dark = 0;
     else if (t < .58) dark = .58 * ((t - .5) / .08);
     else dark = .58 + Math.min(.08, (t - .58) * .1);
-    this.darkness = dark;
+    this.darkness = Math.max(dark, this.inDungeon ? .45 : 0); // 矿洞恒暗，提灯有真实价值
     // 雷暴闪电
     this.lightning = Math.max(0, this.lightning - dt * 1.5);
     if (this.weather === 'storm' && this.phase !== 'day') {
@@ -1035,14 +1251,18 @@ export class Game {
     p.hunger = Math.max(0, p.hunger - dt / 42 * metaMul);
     p.thirst = Math.max(0, p.thirst - dt / 34 * metaMul * (hot ? 1.6 : 1));
     if (!p.moving) p.energy = Math.min(100, p.energy + dt / 12); else p.energy = Math.max(0, p.energy - dt / 90);
-    // 体温
+    // 体温（矿洞内恒温）
     const biome = this.q.biomeAt(Math.floor(p.x), Math.floor(p.z));
-    let temp = 18 + (BIOMES[biome]?.temp || 0) * .6 + SEASON_TEMP[this.seasonIdx()] * .8;
-    if (this.phase === 'night') temp -= 6;
-    if (this.weather === 'snow' || this.weather === 'blizzard') temp -= 8;
-    if (hot) temp += 10;
+    let temp;
+    if (this.inDungeon) temp = 16;
+    else {
+      temp = 18 + (BIOMES[biome]?.temp || 0) * .6 + SEASON_TEMP[this.seasonIdx()] * .8;
+      if (this.phase === 'night') temp -= 6;
+      if (this.weather === 'snow' || this.weather === 'blizzard') temp -= 8;
+      if (hot) temp += 10;
+    }
     const warm = playerWarmth(p);
-    const nearFire = this.buildings.some(b => BUILDINGS[b.id]?.warm && Math.hypot(b.x + .5 - p.x, b.z + .5 - p.z) < 4);
+    const nearFire = !this.inDungeon && this.buildings.some(b => BUILDINGS[b.id]?.warm && Math.hypot(b.x + .5 - p.x, b.z + .5 - p.z) < 4);
     if (nearFire) temp += 10;
     const comfort = temp + warm * 3;
     p.temp = Math.round(temp);
@@ -1160,8 +1380,8 @@ export class Game {
     for (const f of this.floaters) { f.life -= dt; f.y -= dt * 26; }
     this.floaters = this.floaters.filter(f => f.life > 0);
     if (this.floaters.length > 60) this.floaters.splice(0, this.floaters.length - 60);
-    // 刷怪
-    this.ambientSpawn(dt);
+    // 刷怪（矿洞内不刷野外怪）
+    if (!this.inDungeon) this.ambientSpawn(dt);
     // 发现 POI
     for (const poi of this.pois) {
       if (!poi.discovered && Math.hypot(poi.x - p.x, poi.z - p.z) < 9) {
@@ -1169,6 +1389,7 @@ export class Game {
         if (poi.type === 'altar') this.toast(`📍 发现了${poi.n}！可在此召唤 Boss`);
         if (poi.type === 'ruin') { this.toast(`📍 发现了${poi.n}！小心精英怪守卫`); this.bus('ruin'); this.spawnRuinGuards(poi); }
         if (poi.type === 'survivor') this.toast(`📍 发现了幸存者营地！上前对话`);
+        if (poi.type === 'mine') { this.toast(`⛏ 发现了遗忘矿洞入口！深处有稀有矿石与怪物（共10层）`); this.sfx('quest'); }
       }
     }
     // 小镇等级
@@ -1186,9 +1407,9 @@ export class Game {
     // 成就检查（节流）
     this.achT -= dt;
     if (this.achT <= 0) { this.achT = 2; this.checkAch(); }
-    // 自动存档
+    // 自动存档（矿洞内跳过，出洞恢复地面世界后继续）
     this.autosaveT += dt;
-    if (this.autosaveT > 30) { this.autosaveT = 0; this.save(); }
+    if (this.autosaveT > 30 && !this.inDungeon) { this.autosaveT = 0; this.save(); }
   }
 
   spawnRuinGuards(poi) {
@@ -1238,6 +1459,9 @@ export class Game {
       const d = Math.hypot(poi.x + .5 - p.x, poi.z + .5 - p.z);
       if (d < bd) {
         if (poi.type === 'altar') { bd = d; best = { kind: 'altar', x: poi.x + .5, z: poi.z + .5, poi }; }
+        if (poi.type === 'mine') { bd = d; best = { kind: 'mine', x: poi.x + .5, z: poi.z + .5, poi }; }
+        if (poi.type === 'ladder_up') { bd = d; best = { kind: 'ladder_up', x: poi.x + .5, z: poi.z + .5, poi }; }
+        if (poi.type === 'ladder_down') { bd = d; best = { kind: 'ladder_down', x: poi.x + .5, z: poi.z + .5, poi }; }
         if (poi.type === 'chest' && !poi.opened) { bd = d; best = { kind: 'chest', x: poi.x + .5, z: poi.z + .5, poi }; }
         if (poi.type === 'survivor' && !poi.rescued) { bd = d; best = { kind: 'survivor', x: poi.x + .5, z: poi.z + .5, poi }; }
       }
@@ -1254,6 +1478,13 @@ export class Game {
         if (d < bd) { bd = d; best = { kind: 'animal', x: e.x, z: e.z, e }; }
       }
     }
+    // 居民（聊天/送礼入口）
+    for (const e of this.entities) {
+      if (e.kind === 'npc' && !e.escorting) {
+        const d = dist(e, p);
+        if (d < bd) { bd = d; best = { kind: 'npc', x: e.x, z: e.z, e }; }
+      }
+    }
     // 幸存者跟随者（入镇）
     for (const e of this.entities) if (e.kind === 'npc' && e.escorting) best = { kind: 'escort', x: e.x, z: e.z, e };
     return best;
@@ -1265,6 +1496,7 @@ export class Game {
       const [kind, tier] = def.tool;
       const needTool = tier > 1; // T1 徒手可采，只提示
       if (needTool) return def.n + `（需${{ axe: '斧', pick: '镐', shovel: '铲' }[kind] || '工具'}T${tier}）`;
+      if (t.obj.id === 'dirt_wall') return '洞壁（可挖穿，按E挖）';
       if (kind) return def.n + `（连按E采集）`;
       return def.n + '（按E采集）';
     }
@@ -1317,7 +1549,8 @@ export class Game {
           if (this.rng() < Math.min(.9, ch * (rich - 1))) this.spawnDrop(t.tx + .5, t.tz + .5, id, mn);
         }
         const regrow = def.regrow;
-        const nextObj = regrow > 0 ? { regrowId: t.obj.id, id: null, t: regrow } : null;
+        // 矿洞内的资源不重生（层数即新鲜矿脉）
+        const nextObj = (!this.inDungeon && regrow > 0) ? { regrowId: t.obj.id, id: null, t: regrow } : null;
         this.world.obj[t.tz * this.world.W + t.tx] = nextObj;
         if (nextObj) this.regrowSet.add(t.tz * this.world.W + t.tx);
         this.bus('gather', def.drops[0][0], 0); // 计数走 spawnDrop 的 pickup
@@ -1349,10 +1582,13 @@ export class Game {
     }
     if (t.kind === 'altar') {
       const boss = t.poi.id;
-      const stat = this.stats['boss_' + boss];
       this.summonBoss(boss);
       return true;
     }
+    if (t.kind === 'mine') { this.enterMine(); return true; }
+    if (t.kind === 'ladder_down') { this.changeFloor(1); return true; }
+    if (t.kind === 'ladder_up') { this.changeFloor(-1); return true; }
+    if (t.kind === 'npc') { this.talkNPC(t.e); return true; }
     if (t.kind === 'chest') {
       const poi = t.poi;
       if (poi.mimic) {
@@ -1523,6 +1759,7 @@ export class Game {
   // ---------- 保存 ----------
   save(silent) {
     try {
+      if (this.inDungeon) return false; // 矿洞内不写档（退出后地面世界照常保存）
       const p = this.player;
       const data = {
         v: this.version, seed: this.seed, day: this.day, dayTime: this.dayTime, weather: this.weather, time: this.time,
@@ -1530,12 +1767,13 @@ export class Game {
         buildings: this.buildings.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, open: b.open, crop: b.crop })),
         objDiff: (() => { const d = {}; const arr = this.world.obj; for (let i = 0; i < arr.length; i++) { const o = arr[i]; if (o === null) d[i] = 0; else if (o.regrowId) d[i] = { r: o.regrowId, t: o.t }; else if (o.hitT !== undefined || o.hp !== (WORLD_OBJECTS[o.id]?.hp)) d[i] = { hp: o.hp }; } return d; })(),
         pois: this.pois.map(x => ({ ...x })),
-        npcs: this.entities.filter(e => e.kind === 'npc').map(e => ({ name: e.name, job: e.job, x: e.x, z: e.z, happiness: e.happiness, escorting: e.escorting })),
+        npcs: this.entities.filter(e => e.kind === 'npc').map(e => ({ name: e.name, job: e.job, x: e.x, z: e.z, happiness: e.happiness, escorting: e.escorting, bond: e.bond || 0 })),
         housed: this.housedAnimals.map(h => ({ type: h.type, bx: h.b.x, bz: h.b.z, lastDay: h.lastDay })),
         town: { lv: this.town.lv, storage: this.town.storage, merchantDay: this.town.merchantDay, raidTonight: this.town.raidTonight, raidActive: this.town.raidActive },
         stats: this.stats, claimedSides: this.claimedSides, mainIdx: this.mainIdx, dailies: this.dailies,
         codex: this.codex, settings: this.settings, unlockedAch: this.unlockedAch ? [...this.unlockedAch] : [],
         pet: this.pet ? this.pet.type : null, wallTime: Date.now(), cookedKinds: this._cookedKinds ? [...this._cookedKinds] : [],
+        gearLv: this.player.gearLv || {}, orders: this.orders,
       };
       localStorage.setItem(CONFIG.SAVE_KEY, JSON.stringify(data));
       if (!silent) this.toast('💾 已保存');
@@ -1566,7 +1804,7 @@ export class Game {
     this.entities = this.entities.filter(e => e.kind === 'monster' || e.kind === 'animal');
     for (const n of d.npcs) {
       const npc = makeNPC(n.name, n.x, n.z, n.job);
-      npc.happiness = n.happiness; npc.escorting = n.escorting;
+      npc.happiness = n.happiness; npc.escorting = n.escorting; npc.bond = n.bond || 0;
       this.entities.push(npc);
     }
     this.housedAnimals = d.housed.map(h => ({ type: h.type, b: this.buildings.find(b => b.x === h.bx && b.z === h.bz), lastDay: h.lastDay })).filter(h => h.b);
@@ -1582,6 +1820,8 @@ export class Game {
     this.unlockedAch = new Set(d.unlockedAch || []);
     if (d.pet) this.adoptPet(d.pet, true);
     this._cookedKinds = new Set(d.cookedKinds || []);
+    this.player.gearLv = d.gearLv || {};
+    this.orders = d.orders || [];
     this.toast('📂 读取存档成功');
   }
   placeBuildingRaw(b) {

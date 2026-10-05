@@ -263,7 +263,8 @@ export class UI {
     $('hud-coins').textContent = `🪙 ${p.coins}`;
     $('hud-town').textContent = `🏛️ ${G.town.lv}级·${G.settlerCount()}人`;
     const hour = Math.floor(((G.dayTime + .25) % 1) * 24), min = Math.floor((((G.dayTime + .25) % 1) * 24 % 1) * 60);
-    $('hud-time').innerHTML = `<b>第 ${G.day} 天</b> · ${SEASONS[G.seasonIdx()]}季${G.seasonDay} <br> ${PHASE_CN[G.phase]} ${hour}:${String(min).padStart(2, '0')} ${WEATHER_CN[G.weather] || ''}`;
+    const dungeonTag = G.inDungeon ? `<span class="dptag">⛏ 矿洞·第${G.dungeonFloor}层</span><br>` : '';
+    $('hud-time').innerHTML = `${dungeonTag}<b>第 ${G.day} 天</b> · ${SEASONS[G.seasonIdx()]}季${G.seasonDay} <br> ${PHASE_CN[G.phase]} ${hour}:${String(min).padStart(2, '0')} ${WEATHER_CN[G.weather] || ''}`;
     // 任务追踪
     const mq = G.mainQuest();
     if (mq) {
@@ -371,7 +372,7 @@ export class UI {
       inventory: () => this.htmlInventory(), craft: () => this.htmlCraft(), build: () => this.htmlBuild(),
       quests: () => this.htmlQuests(), town: () => this.htmlTown(), codex: () => this.htmlCodex(),
       ach: () => this.htmlAch(), map: () => this.htmlMap(), settings: () => this.htmlSettings(),
-      trade: () => this.htmlTrade(), daily: () => this.htmlQuests('daily'),
+      trade: () => this.htmlTrade(), daily: () => this.htmlQuests('daily'), orders: () => this.htmlQuests('orders'), gift: () => this.htmlGift(),
     }[this.activePanel];
     if (H) { el.innerHTML = `<div class="panel-head"><b>${PANEL_TITLES[this.activePanel]}</b><button class="close" id="panel-close">✕</button></div><div class="panel-body">${H()}</div>`; }
     // 恢复滚动位置（面板每0.25s刷新，不保留的话列表根本没法滑）
@@ -429,7 +430,18 @@ export class UI {
             break;
           }
           case 'store': { const s = G.player.inv[+a1]; if (s && G.addStorage(s.id, s.n)) G.take(s.id, s.n); break; }
-          case 'tab': this.craftTab = a1; this.buildTab = a1; this.codexTab = a1; this.questTab = a1; break;
+          case 'deliverorder': G.deliverOrder(a1); break;
+          case 'giftpanel': this.giftTarget = +a1; this.openPanel('gift'); break;
+          case 'givegift': { if (G.giveGift(this.giftTarget, a1)) this.refreshPanel(); break; }
+          case 'strgear': G.strengthenGear(a1); break;
+          case 'tab': {
+            // 各面板的页签状态独立（原来共享一个值会互相污染）
+            if (this.activePanel === 'craft') this.craftTab = a1;
+            else if (this.activePanel === 'build') this.buildTab = a1;
+            else if (this.activePanel === 'codex') this.codexTab = a1;
+            else this.questTab = a1;
+            break;
+          }
           case 'unequip': G.player.equip[a1] = null; break;
           case 'wipe': if (confirm('确定删除存档并重新开始？')) { G.wipeSave(); location.reload(); } break;
           case 'export': { const data = localStorage.getItem(CONFIG.SAVE_KEY); navigator.clipboard?.writeText(data); prompt('存档已复制到剪贴板（也可手动复制）：', data); break; }
@@ -507,6 +519,29 @@ export class UI {
     for (const b of G.buildings) { const d = BUILDINGS[b.id]; if (d.station && !stations.includes(d.station)) stations.push(d.station); }
     const tabs = stations.map(s => `<button class="tab ${this.craftTab === s ? 'on' : ''}" data-act="tab" data-a1="${s}">${STATIONS[s]}</button>`).join('');
     let rows = '';
+    // 铁砧页签顶部：装备强化台
+    if (this.craftTab === 'anvil') {
+      rows += `<div class="sec-title">🔨 装备强化（每级属性 +8%，最高 +5）</div>`;
+      const slots = [['hand', '武器'], ['head', '头部'], ['body', '身体'], ['feet', '脚部']];
+      let anyGear = false;
+      for (const [slot, name] of slots) {
+        const id = G.player.equip[slot];
+        if (!id) continue;
+        anyGear = true;
+        const lv = G.player.gearLv[id] || 0;
+        const barId = (id.includes('iron') || id.includes('knight') || id.includes('spring')) ? 'bar_iron' : (id.includes('gold') ? 'bar_gold' : 'bar_copper');
+        const cost = 40 * (lv + 1);
+        const can = lv < 5 && G.has(barId, 2) && G.player.coins >= cost;
+        rows += `<div class="recipe-row">
+          <div class="r-ico"><img src="${this.iconURL(id)}"></div>
+          <div class="r-main"><b>${ITEMS[id].n} ${lv > 0 ? `<span class="plus">+${lv}</span>` : ''}</b>
+          <div class="mats"><span class="${G.has(barId, 2) ? 'ok' : 'lack'}">${ITEMS[barId].n}×2</span> <span class="${G.player.coins >= cost ? 'ok' : 'lack'}">🪙${cost}</span></div></div>
+          ${lv >= 5 ? '<span class="lock-tag">已满级</span>' : `<button class="craft-btn ${can ? '' : 'dis'}" data-act="strgear" data-a1="${slot}">强化+${lv + 1}</button>`}
+        </div>`;
+      }
+      if (!anyGear) rows += '<div class="hint">先穿上装备再来强化（背包里点击装备即可穿上）</div>';
+      rows += '<div class="sec-title">打造</div>';
+    }
     for (const r of RECIPES.filter(r => r.st === this.craftTab)) {
       const unlocked = G.recipeUnlocked(r);
       const can = G.canCraft(r);
@@ -545,9 +580,11 @@ export class UI {
     const tabs = `<div class="tabs-row">
       <button class="tab ${t === 'main' ? 'on' : ''}" data-act="tab" data-a1="main">主线</button>
       <button class="tab ${t === 'side' ? 'on' : ''}" data-act="tab" data-a1="side">支线</button>
-      <button class="tab ${t === 'daily' ? 'on' : ''}" data-act="tab" data-a1="daily">日常</button></div>`;
+      <button class="tab ${t === 'daily' ? 'on' : ''}" data-act="tab" data-a1="daily">日常</button>
+      <button class="tab ${t === 'orders' ? 'on' : ''}" data-act="tab" data-a1="orders">商会订单 ${G.orders.length ? '·' + G.orders.length : ''}</button></div>`;
     let body = '';
-    if (t === 'main') {
+    if (t === 'orders') { body = this.htmlOrders(); }
+    else if (t === 'main') {
       const mq = G.mainQuest();
       if (mq) {
         body += questCard(G, mq, true);
@@ -573,6 +610,25 @@ export class UI {
     }
     return tabs + body;
   }
+  htmlOrders() {
+    const G = this.G;
+    if (!G.buildings.some(b => b.id === 'notice_board')) return `<div class="hint">建造<b>公告牌</b>后，商会会在这里挂出收购订单</div>`;
+    if (!G.orders.length) return `<div class="hint">今日订单已全部交付，明天商会会带来新订单</div>`;
+    let out = `<div class="hint">商会收购订单：交付背包或小镇仓库里的货物换金币（货不够可先存仓库凑数）</div>`;
+    for (const o of G.orders) {
+      const rows = o.items.map(([id, n]) => {
+        const have = G.orderHave(id);
+        return `<div class="o-item ${have >= n ? 'ok' : ''}"><img src="${this.iconURL(id)}">${ITEMS[id].n} <b>${have}/${n}</b></div>`;
+      }).join('');
+      const ready = o.items.every(([id, n]) => G.orderHave(id) >= n);
+      out += `<div class="quest-card ${ready ? 'ready' : ''}">
+        <div class="o-items">${rows}</div>
+        <div class="reward">报酬：🪙${o.coins} + ✨${o.xp}</div>
+        <button class="craft-btn ${ready ? '' : 'dis'}" data-act="deliverorder" data-a1="${o.uid}">交付订单</button>
+      </div>`;
+    }
+    return out;
+  }
   htmlTown() {
     const G = this.G;
     const lv = G.town.lv;
@@ -580,9 +636,13 @@ export class UI {
     let settlers = '';
     const npcs = G.entities.filter(e => e.kind === 'npc');
     for (const n of npcs) {
+      const bond = n.bond || 0;
+      const hearts = Math.floor(bond / 20);
+      const heartStr = '❤️'.repeat(hearts) + '🤍'.repeat(5 - hearts);
       settlers += `<div class="settler">
         <div class="s-face">${jobFace(n.job)}</div>
-        <div class="s-info"><b>${n.name}</b><span>😊${Math.round(n.happiness)}</span></div>
+        <div class="s-info"><b>${n.name}</b><span class="hearts" title="好感度 ${bond}/100">${heartStr}</span></div>
+        <button class="mini-btn" data-act="giftpanel" data-a1="${n.id}">🎁送礼</button>
         <select data-job="${n.id}">${Object.entries(JOBS).map(([k, v]) => `<option value="${k}" ${n.job === k ? 'selected' : ''}>${v.n}</option>`).join('')}</select>
       </div>`;
     }
@@ -674,9 +734,34 @@ export class UI {
         <b>🎯 快速上手：</b>跟着左上角主线任务走。白天采集建造，天黑怪物出没注意战斗或回城躲避。<br>
         <b>⌨️ 键盘：</b>WASD移动 · J/空格攻击 · E互动采集 · F钓鱼收杆 · H回城 · B建造 · I背包 · C制作 · Q任务 · M地图 · 1-8快捷栏 · 滚轮缩放 · Esc关闭<br>
         <b>📱 触屏：</b>左摇杆移动 · ⚔️按住连击 · ✋互动采集钓鱼（有目标时按钮会发光）<br>
-        <b>💡 进阶：</b>怪物靠近会自动攻击（可关）；击杀3只内连杀有金币奖励；肉 attracted 商队每3天来访；四季影响作物与温度；祭坛可召唤Boss
+        <b>⛏ 遗忘矿洞：</b>荒野里找到矿洞入口进入。挖穿岩壁开路，矿石越深越好，每层有下行梯，共10层。矿洞内恒暗（提灯有用），不自动存档，倒下会回本层入口<br>
+        <b>📋 商会订单：</b>公告牌挂出收购单，凑齐货物（背包+仓库）交付换双倍价金币<br>
+        <b>❤️ 居民好感：</b>小镇面板送礼/每天聊天加好感，里程碑有丰厚回礼，满级给「友谊之星」<br>
+        <b>🔨 装备强化：</b>铁砧页签顶部可强化已穿装备（+1~+5，每级+8%属性）<br>
+        <b>💡 进阶：</b>击杀3只内连杀有金币奖励；四季影响作物与温度；祭坛可反复挑战Boss刷徽章
       </div>`;
   }
+  // 送礼面板
+  giftTarget = 0;
+  htmlGift() {
+    const G = this.G;
+    const npc = G.entities.find(e => e.id === this.giftTarget && e.kind === 'npc');
+    if (!npc) return '<div class="hint">找不到这位居民</div>';
+    const bond = npc.bond || 0;
+    const hearts = '❤️'.repeat(Math.floor(bond / 20)) + '🤍'.repeat(5 - Math.floor(bond / 20));
+    const agg = {};
+    for (const s of G.player.inv) if (s && ['food', 'res', 'special'].includes(ITEMS[s.id].c)) agg[s.id] = (agg[s.id] || 0) + s.n;
+    let grid = '';
+    for (const [id, n] of Object.entries(agg)) {
+      const pts = ITEMS[id].c === 'food' ? 6 + Math.min(9, Math.round((ITEMS[id].p || 2) / 3)) : ITEMS[id].c === 'special' ? 10 : 3;
+      grid += `<div class="slot" data-act="givegift" data-a1="${id}" title="好感 +${pts}">
+        <img src="${this.iconURL(id)}"><b>${n > 1 ? n : ''}</b><i class="pts">+${pts}</i></div>`;
+    }
+    return `<div class="town-head">送给 <b>${npc.name}</b> ${hearts}（${bond}/100）</div>
+      <div class="hint">食物最讨喜（越贵的加得越多），矿石工具类加得少。好感里程碑：工作效率↑ / 回礼 / 技能点 / 金币 / 友谊之星</div>
+      <div class="inv-grid">${grid || '<div class="hint">背包里没有可送的礼物</div>'}</div>`;
+  }
+
   htmlTrade() {
     const G = this.G;
     let badgeHtml = '';
@@ -748,7 +833,7 @@ export class UI {
   }
 }
 
-const PANEL_TITLES = { inventory: '🎒 背包与装备', craft: '⚒️ 制作', build: '🔨 建造', quests: '📜 任务', town: '🏛️ 小镇管理', codex: '📖 图鉴', ach: '🏅 成就', map: '🗺️ 世界地图', settings: '⚙️ 设置与帮助', trade: '🛒 商队交易', daily: '📋 今日委托' };
+const PANEL_TITLES = { inventory: '🎒 背包与装备', craft: '⚒️ 制作', build: '🔨 建造', quests: '📜 任务', town: '🏛️ 小镇管理', codex: '📖 图鉴', ach: '🏅 成就', map: '🗺️ 世界地图', settings: '⚙️ 设置与帮助', trade: '🛒 商队交易', daily: '📋 今日委托', gift: '🎁 送礼' };
 function xpNeedTxt(lv) { return Math.floor(60 * Math.pow(lv, 1.35)); }
 function goalText(g) {
   const N = (id) => ITEMS[id]?.n || id;
@@ -772,6 +857,9 @@ function goalText(g) {
     case 'harvest': return `收获 ${g.n} 次`;
     case 'cook': return `烹饪 ${g.n} 道`;
     case 'mine_total': return `挖掘 ${g.n} 份矿石`;
+    case 'dungeon': return `抵达矿洞第 ${g.n} 层`;
+    case 'order': return `完成 ${g.n} 张商会订单`;
+    case 'gift': return `送礼 ${g.n} 次`;
     default: return '';
   }
 }

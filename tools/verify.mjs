@@ -7,7 +7,7 @@ globalThis.localStorage = { _m: {}, getItem(k) { return this._m[k] ?? null }, se
 import { ITEMS, RECIPES, BUILDINGS, MONSTERS, ANIMALS, CROPS, WORLD_OBJECTS, MAIN_QUESTS, SIDE_QUESTS, DAILY_POOL, ACHIEVEMENTS, SKILLS, MERCHANT, FISH_TABLE, BIOMES, RANDOM_EVENTS, CONFIG } from '../js/data.js';
 import { genWorld, makeQueries, BIOME_IDS } from '../js/world.js';
 import { Game } from '../js/systems.js';
-import { xpNeed, addItem, countItem, playerAttack } from '../js/entities.js';
+import { xpNeed, addItem, countItem, playerAttack, playerDmgMul } from '../js/entities.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, name) => { if (cond) { pass++; } else { fail++; console.error('  ❌ ' + name); } };
@@ -449,6 +449,104 @@ section('v7：夜袭集合点/水壶喝水/农田可见/m14箭头');
   Gm.placeBuilding('altar_ancient', Gm.world.center.x, Gm.world.center.z + 3, true);
   Gm.checkQuests();
   ok(Gm.guideArrow && Gm.guideArrow.label && Gm.guideArrow.label.includes('远古祭坛'), `m14箭头指向祭坛（${Gm.guideArrow && Gm.guideArrow.label}）`);
+}
+
+// ---------------- 3.10 v8 深度系统 ----------------
+section('v8：商会订单/好感送礼/装备强化/遗忘矿洞');
+// 订单全生命周期
+{
+  const Go = new Game(88);
+  Go.buildings.push({ id: 'notice_board', x: 0, z: 0, hp: 120, open: false, crop: null });
+  Go.rollOrders();
+  ok(Go.orders.length === 3, `订单刷新3张（${Go.orders.length}）`);
+  const o = Go.orders[0];
+  ok(o.items.length >= 1 && o.coins > 0 && o.xp > 0, '订单结构完整');
+  // 混合库存交付：一半放仓库一半放背包
+  const [id, n] = o.items[0];
+  Go.give(id, Math.ceil(n / 2));
+  Go.addStorage(id, n - Math.ceil(n / 2));
+  ok(Go.orderHave(id) >= n, `混合库存计数（背包${Go.count(id)}+仓库${Go.storageCount(id)}）`);
+  const c0 = Go.player.coins;
+  ok(Go.deliverOrder(o.uid) === true, '订单交付');
+  ok(Go.player.coins > c0 && Go.stats.orders_done === 1, '订单奖励入账');
+  ok(Go.count(id) === 0 && Go.storageCount(id) === 0, '货物被扣走');
+}
+// 好感送礼 + 里程碑
+{
+  const Gf2 = new Game(89);
+  const npc = Gf2.addSettler('阿宝', 'none');
+  Gf2.give('cake', 5);
+  ok(Gf2.giveGift(npc.id, 'cake') === true && npc.bond > 0, `送礼加好感（bond=${npc.bond}）`);
+  npc.bond = 18;
+  Gf2.giveGift(npc.id, 'cake'); // +15左右跨过20
+  ok(npc.bond >= 20, `跨过1心里程碑（bond=${npc.bond}）`);
+  npc.bond = 95;
+  Gf2.giveGift(npc.id, 'cake');
+  ok(npc.bond >= 100 && Gf2.count('bond_star') >= 1 && Gf2.stats.bond_max === 1, `满好感给友谊之星（bond=${npc.bond}）`);
+  // 每日聊天
+  npc.chatToday = false;
+  Gf2.talkNPC(npc);
+  ok(npc.chatToday === true, '每日聊天标记');
+}
+// 装备强化：属性实际成长
+{
+  const Gs2 = new Game(90);
+  Gs2.equip('sword_stone');
+  const m0 = playerDmgMul(Gs2.player);
+  Gs2.give('bar_copper', 10); Gs2.player.coins = 500;
+  ok(Gs2.strengthenGear('hand') === true, '强化成功');
+  ok((Gs2.player.gearLv['sword_stone'] || 0) === 1, '强化等级记录');
+  const m1 = playerDmgMul(Gs2.player);
+  ok(m1 > m0, `强化提升伤害倍率（${m0.toFixed(2)}→${m1.toFixed(2)}）`);
+  Gs2.player.gearLv['sword_stone'] = 5;
+  ok(Gs2.strengthenGear('hand') === false, '+5满级拒绝');
+}
+// 矿洞：生成/进出/下层/存档保护
+{
+  const Gd2 = new Game(91);
+  ok(!!Gd2.pois.find(p => p.type === 'mine'), '矿洞入口POI已布点');
+  ok(Gd2.enterMine() === true, '进入矿洞');
+  ok(Gd2.world.W === 40 && Gd2.world.dungeon === true, `洞窟世界40×40`);
+  const mons = Gd2.entities.filter(e => e.kind === 'monster');
+  ok(mons.length >= 2, `洞内怪物（${mons.length}只）`);
+  let ores = 0, walls = 0;
+  for (const o of Gd2.world.obj) { if (o && o.id.startsWith('ore_')) ores++; if (o && o.id === 'dirt_wall') walls++; }
+  ok(ores >= 10, `矿脉数量（${ores}）`);
+  ok(walls > 300, `洞壁（${walls}块，可挖穿）`);
+  // 入口→下行梯连通性（BFS 野怪不管，只看可走格）
+  {
+    const { q } = Gd2;
+    const ent = Gd2.pois[0], down = Gd2.pois[1];
+    const seen = new Set([q.idx(ent.x, ent.z)]);
+    const qu = [[ent.x, ent.z]];
+    while (qu.length) {
+      const [cx, cz] = qu.shift();
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx, nz = cz + dz;
+        if (!q.inBounds(nx, nz)) continue;
+        const i = q.idx(nx, nz);
+        if (seen.has(i)) continue;
+        const o = Gd2.world.obj[i];
+        if (o && o.id === 'dirt_wall') continue;
+        seen.add(i); qu.push([nx, nz]);
+      }
+    }
+    ok(seen.has(q.idx(down.x, down.z)), '入口→下行梯连通（不通的孤岛已封死）');
+  }
+  ok(Gd2.save(true) === false, '矿洞内拒绝写档');
+  const before = localStorage.getItem(CONFIG.SAVE_KEY);
+  ok(before === null || JSON.parse(before).seed !== undefined, '存档未被污染');
+  Gd2.changeFloor(1);
+  ok(Gd2.dungeonFloor === 2 && Gd2.world.floor === 2, `下到第2层`);
+  ok((Gd2.stats.dungeon_best || 0) >= 2, '最深层纪录');
+  Gd2.exitMine();
+  ok(Gd2.world.W === 144 && Gd2.buildings.length === Gd2._owNullSafe !== true && Gd2.inDungeon === 0, '出洞恢复地面世界');
+}
+// goalDone 新类型
+{
+  const Gq = new Game(92);
+  Gq.stats.dungeon_best = 3; Gq.stats.orders_done = 5; Gq.stats.gifts_given = 5;
+  ok(Gq.goalDone({ t: 'dungeon', n: 3 }) && Gq.goalDone({ t: 'order', n: 5 }) && Gq.goalDone({ t: 'gift', n: 5 }), '新任务目标判定');
 }
 
 // ---------------- 4. 汇总 ----------------

@@ -165,6 +165,7 @@ export const ITEMS = {
   trophy_flame:  { n: '炎魔核心',       c: 'special', p: 200, d: '仍在燃烧的火焰心脏' },
   trophy_ancient:{ n: '远古之心',       c: 'special', p: 500, d: '山谷万物的源初之力' },
   essence_badge: { n: 'Boss徽章',       c: 'special', p: 60, d: '击败Boss获得的荣誉徽章，可在商队兑换珍品' },
+  bond_star:     { n: '友谊之星',       c: 'special', p: 200, d: '居民与你友谊的见证（好感度满级赠礼）' },
   pet_egg_dragon:{ n: '龙蛋',           c: 'special', p: 300, d: '温热的龙蛋，使用后孵化一只小龙宠物（击败炎魔领主掉落）' },
   strawberry:    { n: '草莓',   c: 'food', p: 5, food: { h: 6, t: 5, e: 4 }, d: '香甜的红草莓' },
   corn:          { n: '玉米',   c: 'food', p: 4, food: { h: 6, e: 5 }, d: '金黄饱满的玉米' },
@@ -419,6 +420,7 @@ export const WORLD_OBJECTS = {
   hive:      { n: '野蜂巢', tool: [null, 0], hp: 1, drops: [['honey', 1, 2, 1]], regrow: 400, shadow: .6 },
   meteor:    { n: '陨星残骸', tool: ['pick', 2], hp: 4, drops: [['crystal', 2, 4, 1], ['ore_iron', 1, 2, 1]], regrow: 0, block: true, shadow: .8 },
   ruin_pillar:{ n: '残破石柱', tool: ['pick', 2], hp: 4, drops: [['stone', 3, 5, 1], ['brick', 1, 1, .3]], regrow: 0, block: true, shadow: .9 },
+  dirt_wall:  { n: '洞壁岩石', tool: ['pick', 1], hp: 6, drops: [['stone', 2, 3, 1], ['coal', 1, 1, .3]], regrow: 0, block: true, shadow: .8 },
 };
 
 // ---------------- 钓鱼 ----------------
@@ -474,6 +476,9 @@ export const SIDE_QUESTS = [
   { id: 's6', n: '牧场主梦',   desc: '收养 3 只牲畜',          goals: [{ t: 'house_animal', n: 3 }], reward: { items: [['feed', 8]], coins: 60, xp: 120 } },
   { id: 's7', n: '第一桶金',   desc: '通过出售累计赚取 300 金币', goals: [{ t: 'sell_coins', n: 300 }], reward: { coins: 100, xp: 120 } },
   { id: 's8', n: '废墟探险家', desc: '探访 3 处古代废墟',      goals: [{ t: 'ruin', n: 3 }],     reward: { items: [['key_ruin', 1]], coins: 80, xp: 150 } },
+  { id: 's9', n: '矿洞初探',   desc: '深入遗忘矿洞到达第 3 层', goals: [{ t: 'dungeon', n: 3 }], reward: { items: [['bomb', 3], ['potion_small', 2]], xp: 150 } },
+  { id: 's10', n: '商会红人',  desc: '完成 5 张商会订单',       goals: [{ t: 'order', n: 5 }],   reward: { items: [['bar_gold', 2]], coins: 150, xp: 200 } },
+  { id: 's11', n: '慷慨之人',  desc: '给居民送礼 5 次',         goals: [{ t: 'gift', n: 5 }],    reward: { items: [['cake', 2]], xp: 150 } },
 ];
 
 // ---------------- 日常委托池 ----------------
@@ -530,6 +535,13 @@ export const ACHIEVEMENTS = [
   { id: 'a_mon_20',      n: '怪物学者',   desc: '图鉴遭遇 20 种怪物',     cond: { t: 'stat', k: 'mon_seen', n: 20 } },
   { id: 'a_cook_all',    n: '美食家',     desc: '烹饪 10 种不同料理',     cond: { t: 'stat', k: 'cook_kinds', n: 10 } },
   { id: 'a_offline',     n: '挂机也是玩', desc: '领取一次离线收益',       cond: { t: 'stat', k: 'offline_claim', n: 1 } },
+  { id: 'a_order_1',     n: '第一单',     desc: '完成首张商会订单',       cond: { t: 'stat', k: 'orders_done', n: 1 } },
+  { id: 'a_order_10',    n: '商会红人',   desc: '完成 10 张商会订单',     cond: { t: 'stat', k: 'orders_done', n: 10 } },
+  { id: 'a_mine_3',      n: '下矿工',     desc: '抵达矿洞第 3 层',        cond: { t: 'stat', k: 'dungeon_best', n: 3 } },
+  { id: 'a_mine_10',     n: '洞穴探险家', desc: '抵达矿洞第 10 层',       cond: { t: 'stat', k: 'dungeon_best', n: 10 } },
+  { id: 'a_gift_10',     n: '慷慨之人',   desc: '给居民送礼 10 次',       cond: { t: 'stat', k: 'gifts_given', n: 10 } },
+  { id: 'a_bond_100',    n: '莫逆之交',   desc: '与一位居民好感度满级',   cond: { t: 'stat', k: 'bond_max', n: 1 } },
+  { id: 'a_str_5',       n: '神兵利器',   desc: '把一件装备强化到 +5',    cond: { t: 'stat', k: 'str_max', n: 1 } },
 ];
 
 // ---------------- 技能树（4系12技能） ----------------
@@ -595,4 +607,45 @@ export const TOWN_LEVELS = [
 // ---------------- 工具快捷查询 ----------------
 export const STATIONS = {
   hand: '徒手', bench: '工作台', furnace: '熔炉', anvil: '铁砧', pot: '烹饪锅', saw: '锯木台',
+};
+
+// ---------------- 商会订单池（按小镇等级解锁档位） ----------------
+export const ORDER_POOL = [
+  { lv: 1, items: [['wood', 5, 10], ['stone', 5, 10], ['fiber', 4, 8], ['berry', 4, 8], ['resin', 2, 4]] },
+  { lv: 2, items: [['plank', 3, 6], ['coal', 3, 6], ['ore_copper', 3, 5], ['rope', 2, 4], ['carrot', 3, 6], ['apple', 3, 5]] },
+  { lv: 3, items: [['bar_copper', 2, 4], ['bar_iron', 2, 4], ['bread', 2, 4], ['meat_cooked', 2, 4], ['cloth', 2, 3], ['jerky', 2, 3]] },
+  { lv: 4, items: [['bar_gold', 1, 3], ['cheese', 2, 3], ['gear', 1, 2], ['potion_small', 2, 3], ['stew', 1, 2], ['fish_soup', 1, 2]] },
+  { lv: 5, items: [['cake', 1, 2], ['potion_big', 1, 2], ['bar_gold', 2, 3], ['feast', 1, 1]] },
+];
+
+// ---------------- 矿洞地下城 ----------------
+export const DUNGEON = {
+  name: '遗忘矿洞',
+  maxFloor: 10,
+  // 每层怪物池与矿石表（f 为层数）
+  monPool(f) {
+    if (f <= 2) return ['slime', 'bat_fire', 'mush_toxic'];
+    if (f <= 4) return ['spider', 'skeleton', 'goblin', 'slime_ice'];
+    if (f <= 6) return ['mummy', 'demon_imp', 'bog_lurker', 'goblin_archer'];
+    if (f <= 8) return ['demon_lava', 'yeti', 'shadow', 'sand_cobra'];
+    return ['rock_golem', 'dragon_whelp', 'demon_lava', 'banshee'];
+  },
+  ores(f) {
+    if (f <= 2) return ['ore_copper', 'ore_coal', 'ore_copper', 'ore_coal', 'ore_iron'];
+    if (f <= 4) return ['ore_iron', 'ore_copper', 'ore_coal', 'ore_crystal'];
+    if (f <= 6) return ['ore_iron', 'ore_crystal', 'ore_gold', 'ore_coal'];
+    if (f <= 8) return ['ore_gold', 'ore_crystal', 'ore_iron', 'obsidian'];
+    return ['ore_gold', 'ore_crystal', 'obsidian', 'ore_crystal'];
+  },
+  oreCount(f) { return 26 + f * 4; },
+  monCount(f) { return 3 + f; },
+};
+
+// 好感度里程碑（心 = 20 点）
+export const BOND_MILESTONES = {
+  20: { d: '干劲十足：全体居民工作效率 +2%', coin: 0 },
+  40: { d: '回赠礼物', gift: [['apple', 3], ['honey', 2], ['bar_copper', 2], ['berry', 5]] },
+  60: { d: '传授心得：+1 技能点', skill: 1 },
+  80: { d: '攒钱报答：+80 金币', coin: 80 },
+  100: { d: '莫逆之交：赠予「友谊之星」', item: ['bond_star', 1] },
 };

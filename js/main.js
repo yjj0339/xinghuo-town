@@ -117,6 +117,7 @@ function wire() {
   G.sfxFn = n => sfx.play(n);
   G.openPanel = n => ui.openPanel(n);
   G.openStation = st => { ui.craftTab = st; ui.openPanel('craft'); };
+  G.renderer = renderer; // 矿洞切换时吸附镜头用
   renderer.cam.x = G.player.x; renderer.cam.z = G.player.z;
 }
 
@@ -271,6 +272,7 @@ function showTitle() {
   const params = new URLSearchParams(location.search);
   if (params.get('auto')) { document.getElementById('title').style.display = 'none'; newGame(); return; }
   if (params.get('test')) { document.getElementById('title').style.display = 'none'; newGame(params.get('seed') ? +params.get('seed') : undefined); runSmokeTest(params.get('test')); return; }
+  if (params.get('mine')) { document.getElementById('title').style.display = 'none'; newGame(888); setTimeout(() => { G.enterMine(); G.player.x = G.world.pois[0].x + 2.5; G.player.z = G.world.pois[0].z + .5; setTimeout(() => { document.title = 'MINE ' + JSON.stringify({ d: G.inDungeon, px: +G.player.x.toFixed(1), pz: +G.player.z.toFixed(1), camx: +renderer.cam.x.toFixed(1), camz: +renderer.cam.z.toFixed(1), ents: G.entities.length, dark: +G.darkness.toFixed(2) }); }, 800); }, 1200); return; }
   const hasSave = !!Game.load();
   const el = document.getElementById('title');
   el.style.display = '';
@@ -323,6 +325,38 @@ function runSmokeTest(mode) {
         G.day = 15; G.dayTime = .7; G.darkness = .5; G.weather = 'rain';
         renderer.render(G);
         G.weather = 'sunny';
+        renderer.render(G);
+      });
+      step('订单交付', () => {
+        G.buildings.push({ id: 'notice_board', x: 0, z: 0, hp: 120, open: false, crop: null });
+        G.orders = [];
+        G.rollOrders();
+        if (!G.orders.length) throw new Error('没有生成订单');
+        const o = G.orders[0];
+        for (const [id, n] of o.items) { G.give(id, n); }
+        const coins0 = G.player.coins;
+        if (!G.deliverOrder(o.uid)) throw new Error('交付失败');
+        if (G.player.coins <= coins0) throw new Error('金币没加');
+      });
+      step('送礼好感', () => {
+        const npc = G.addSettler('礼品员', 'none');
+        G.give('cake', 2);
+        if (!G.giveGift(npc.id, 'cake')) throw new Error('送礼失败');
+        if (!(npc.bond > 0)) throw new Error('好感没加');
+      });
+      step('装备强化', () => {
+        G.equip('sword_stone');
+        G.give('bar_copper', 4); G.player.coins += 200;
+        if (!G.strengthenGear('hand')) throw new Error('强化失败');
+        if ((G.player.gearLv['sword_stone'] || 0) !== 1) throw new Error('等级没记');
+      });
+      step('矿洞进出', () => {
+        if (!G.enterMine()) throw new Error('进洞失败');
+        if (G.world.W !== 40) throw new Error('洞窟尺寸不对: ' + G.world.W);
+        if (G.entities.filter(e => e.kind === 'monster').length < 2) throw new Error('洞内没怪');
+        renderer.render(G); // 洞窟渲染一帧
+        G.exitMine();
+        if (G.world.W !== 144) throw new Error('出洞世界没恢复');
         renderer.render(G);
       });
       step('存档', () => G.save(true));

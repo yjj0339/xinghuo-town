@@ -37,8 +37,14 @@ export function xpNeed(lv) { return Math.floor(60 * Math.pow(lv, 1.35)); }
 
 export function playerDefense(p) {
   let def = 0;
-  for (const s of ['head', 'body', 'feet']) { const it = p.equip[s] && ITEMS[p.equip[s]]; if (it?.arm) def += it.arm.def; }
-  if (p.equip.acc && ITEMS[p.equip.acc]?.arm) def += ITEMS[p.equip.acc].arm.def || 0;
+  const gl = p.gearLv || {};
+  for (const s of ['head', 'body', 'feet']) {
+    const id = p.equip[s];
+    const it = id && ITEMS[id];
+    if (it?.arm) def += it.arm.def * (1 + .08 * (gl[id] || 0));
+  }
+  const accId = p.equip.acc;
+  if (accId && ITEMS[accId]?.arm) def += (ITEMS[accId].arm.def || 0);
   return def;
 }
 export function playerDmgMul(p) {
@@ -47,6 +53,8 @@ export function playerDmgMul(p) {
   if (p.skills.power) m += p.skills.power * .08;
   const acc = p.equip.acc && ITEMS[p.equip.acc];
   if (acc?.arm?.dmgPct) m += acc.arm.dmgPct;
+  const handId = p.equip.hand;
+  if (handId && p.gearLv?.[handId]) m *= 1 + .08 * p.gearLv[handId];
   return m;
 }
 export function playerWarmth(p) {
@@ -266,7 +274,7 @@ export function updateNPC(G, e, dt) {
     e.say = { text: pool[Math.floor(Math.random() * pool.length)], t: 3 };
   }
   const tc = G.townCenter, R = CONFIG.TOWN_RADIUS;
-  const eff = (1 + (G.player.skills.mayor || 0) * .1) * (e.happiness / 70);
+  const eff = (1 + (G.player.skills.mayor || 0) * .1 + (G.bondCheer ? G.bondCheer() : 0)) * (e.happiness / 70);
   e.workT -= dt;
 
   const goTarget = (tx, tz, done, speedMul = 1) => {

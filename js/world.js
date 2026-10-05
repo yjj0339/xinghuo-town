@@ -232,3 +232,110 @@ export function makeQueries(world) {
     hasBlockObj: (x, z) => { const o = obj[idx(x, z)]; return !!(o && WORLD_OBJECTS[o.id] && WORLD_OBJECTS[o.id].block); },
   };
 }
+
+// ============================================================
+// 遗忘矿洞：元胞自动机洞穴生成（每层独立，挖墙可开新路）
+// ============================================================
+export function genDungeon(seed, floor, DUNGEON) {
+  const rng = mulberry32((seed ^ (floor * 7919)) >>> 0);
+  const W = 40, H = 40;
+  const biome = new Uint8Array(W * H).fill(7); // volcano 暗棕色调当洞窟
+  const variant = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) variant[i] = Math.floor(rng() * 3);
+
+  // 1) 随机铺墙 + 元胞自动机平滑 4 轮
+  let grid = new Uint8Array(W * H);
+  for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+    grid[z * W + x] = (x < 2 || z < 2 || x >= W - 2 || z >= H - 2 || rng() < .42) ? 1 : 0;
+  }
+  for (let it = 0; it < 4; it++) {
+    const ng = new Uint8Array(W * H);
+    for (let z = 1; z < H - 1; z++) for (let x = 1; x < W - 1; x++) {
+      let n = 0;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (dx || dz) n += grid[(z + dz) * W + (x + dx)];
+      ng[z * W + x] = n >= 5 ? 1 : n <= 3 ? 0 : grid[z * W + x];
+    }
+    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+      if (x < 2 || z < 2 || x >= W - 2 || z >= H - 2) ng[z * W + x] = 1;
+    }
+    grid = ng;
+  }
+
+  // 2) 找出最大连通开放区作为主洞（其余全部封死）——保证生成稳定
+  const region = new Int32Array(W * H).fill(-1);
+  const regions = [];
+  for (let sz = 0; sz < H; sz++) for (let sx = 0; sx < W; sx++) {
+    const si = sz * W + sx;
+    if (grid[si] || region[si] >= 0) continue;
+    const id = regions.length;
+    const cells = [];
+    region[si] = id; cells.push([sx, sz]);
+    for (let qi = 0; qi < cells.length; qi++) {
+      const [cx, cz] = cells[qi];
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx, nz = cz + dz;
+        if (nx < 0 || nz < 0 || nx >= W || nz >= H) continue;
+        const ni = nz * W + nx;
+        if (!grid[ni] && region[ni] < 0) { region[ni] = id; cells.push([nx, nz]); }
+      }
+    }
+    regions.push(cells);
+  }
+  if (!regions.length) return genDungeon(seed + 1, floor, DUNGEON); // 极端情况换种子
+  const main = regions.reduce((a, b) => (b.length > a.length ? b : a));
+  for (let i = 0; i < W * H; i++) if (!grid[i] && region[i] !== regions.indexOf(main)) grid[i] = 1;
+
+  // 3) 主洞内定入口（最左上）与出口（BFS 最远）
+  const sorted = [...main].sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]));
+  const ent = { x: sorted[0][0], z: sorted[0][1] };
+  const dist = new Map([[ent.z * W + ent.x, 0]]);
+  const queue = [[ent.x, ent.z]];
+  while (queue.length) {
+    const [cx, cz] = queue.shift();
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cx + dx, nz = cz + dz, ni = nz * W + nx;
+      if (nx < 0 || nz < 0 || nx >= W || nz >= H || grid[ni] || dist.has(ni)) continue;
+      dist.set(ni, dist.get(cz * W + cx) + 1);
+      queue.push([nx, nz]);
+    }
+  }
+  let farCell = ent, farD = -1;
+  for (const [i, d] of dist) if (d > farD) { farD = d; farCell = { x: i % W, z: Math.floor(i / W) }; }
+
+  // 4) 墙体 → 洞壁物体（可挖穿！）
+  const obj = new Array(W * H).fill(null);
+  for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+    if (grid[z * W + x]) obj[z * W + x] = { id: 'dirt_wall', hp: 6, t: 0, v: Math.floor(rng() * 3) };
+  }
+
+  // 5) 矿脉：优先贴墙空格，不够从主洞随机补
+  const oreTable = DUNGEON.ores(floor);
+  const wallSide = main.filter(([x, z]) => {
+    let n = 0;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, nz = z + dz;
+      if (nx >= 0 && nz >= 0 && nx < W && nz < H && grid[nz * W + nx]) n++;
+    }
+    return n >= 2;
+  });
+  for (let i = wallSide.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [wallSide[i], wallSide[j]] = [wallSide[j], wallSide[i]]; }
+  const fallback = [...main].filter(([x, z]) => !(x === ent.x && z === ent.z) && !(x === farCell.x && z === farCell.z));
+  for (let i = fallback.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [fallback[i], fallback[j]] = [fallback[j], fallback[i]]; }
+  const spots = wallSide.concat(fallback);
+  const oreN = Math.min(DUNGEON.oreCount(floor), spots.length);
+  for (let k = 0; k < oreN; k++) {
+    const spot = spots[k];
+    const oid = oreTable[Math.floor(rng() * oreTable.length)];
+    obj[spot[1] * W + spot[0]] = { id: oid, hp: 4, t: 0, v: Math.floor(rng() * 3) };
+  }
+
+  // 6) 楼梯 POI：入口向上梯（1层=出口），最远处向下梯
+  const pois = [{ type: 'ladder_up', x: ent.x, z: ent.z, discovered: true }];
+  if (floor < DUNGEON.maxFloor) pois.push({ type: 'ladder_down', x: farCell.x, z: farCell.z, discovered: false });
+
+  return {
+    seed, W, H, biome, variant, obj,
+    center: { x: ent.x, z: ent.z },
+    pois, dungeon: true, floor,
+  };
+}

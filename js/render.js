@@ -221,6 +221,14 @@ export function drawWorldObject(ctx, o, wx, wz, time) {
     case 'grass_tuft': { ctx.strokeStyle = '#6cbf4a'; ctx.lineWidth = 2.5; for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * 3.4, 1); ctx.quadraticCurveTo(i * 4.4 + sway * 30, -8, i * 5.4, -13); ctx.stroke(); } break; }
     case 'flower_patch': { for (const [dx, dy] of [[-8, -3], [0, -8], [8, -2], [-3, 3]]) { ctx.strokeStyle = '#5c8a3c'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(dx, dy + 4); ctx.lineTo(dx, dy - 2); ctx.stroke(); ctx.fillStyle = ['#f0909c', '#f0c84c', '#a8c8f0', '#f2f2f2'][(dx + 9) % 4]; for (let p = 0; p < 5; p++) { const a = p / 5 * Math.PI * 2; ctx.beginPath(); ctx.arc(dx + Math.cos(a) * 3, dy - 3 + Math.sin(a) * 3, 2, 0, Math.PI * 2); ctx.fill(); } } break; }
     case 'ruin_pillar': { ell(ctx, 0, 3, 13, 6, '#222', .18); ctx.fillStyle = '#b8b2a4'; ctx.fillRect(-8, -34, 16, 36); ctx.fillStyle = '#a09a8c'; ctx.fillRect(-8, -34, 6, 36); ctx.fillStyle = '#c9c3b5'; ctx.fillRect(-11, -38, 22, 6); ctx.fillRect(-11, -2, 22, 5); break; }
+    case 'dirt_wall': { // 洞窟岩壁（暗色大圆石，暗示可以挖）
+      ell(ctx, 0, 3, 17, 8, '#141210', .35);
+      ctx.fillStyle = '#4e4550'; ctx.beginPath();
+      ctx.moveTo(-17, 4); ctx.lineTo(-12, -14); ctx.lineTo(-2, -20); ctx.lineTo(10, -16); ctx.lineTo(17, -2); ctx.lineTo(13, 6); ctx.lineTo(-10, 8); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#3c3540'; ctx.beginPath(); ctx.moveTo(-17, 4); ctx.lineTo(-12, -14); ctx.lineTo(-4, -6); ctx.lineTo(-8, 5); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(20,16,24,.5)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(-6, -12); ctx.lineTo(-2, -4); ctx.lineTo(-6, 2); ctx.moveTo(6, -12); ctx.lineTo(8, -2); ctx.stroke();
+      break; }
   }
   ctx.restore();
 }
@@ -526,7 +534,9 @@ export class Renderer {
     for (const pr of G.projectiles) sprites.push({ d: pr.x + pr.z, k: 'proj', pr });
     for (const mt of G.meteors || []) sprites.push({ d: mt.x + mt.z, k: 'meteor', mt });
     for (const p of G.pois) {
-      if ((p.type === 'altar' || (p.type === 'chest' && !p.opened) || (p.type === 'survivor' && !p.rescued)) && Math.abs(p.x - cx) < range && Math.abs(p.z - cz) < range)
+      const vis = p.type === 'altar' || p.type === 'mine' || p.type === 'ladder_up' || p.type === 'ladder_down'
+        || (p.type === 'chest' && !p.opened) || (p.type === 'survivor' && !p.rescued);
+      if (vis && Math.abs(p.x - cx) < range && Math.abs(p.z - cz) < range)
         sprites.push({ d: p.x + p.z + .2, k: 'poi', p });
     }
     if (G.ghost) sprites.push({ d: G.ghost.x + G.ghost.z + .5, k: 'ghost', g: G.ghost });
@@ -629,8 +639,9 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
-  // 环境氛围：夜晚萤火虫 / 秋日落叶 / 雨天涟漪
+  // 环境氛围：夜晚萤火虫 / 秋日落叶 / 雨天涟漪（矿洞内不适用）
   renderAmbient(G) {
+    if (G.inDungeon) return;
     const ctx = this.ctx, t = G.time;
     // 世界坐标粒子 → 屏幕投影（跟随镜头的小范围随机游走）
     if (!this._ambient) {
@@ -866,5 +877,32 @@ function drawPoi(ctx, p, t) {
     ctx.strokeStyle = 'rgba(60,45,25,.7)'; ctx.lineWidth = 3;
     ctx.strokeText('幸存者', 0, -66);
     ctx.fillStyle = '#8ce05c'; ctx.fillText('幸存者', 0, -66);
+  } else if (p.type === 'mine') {
+    // 矿洞入口：岩拱+黑洞口+木牌
+    ell(ctx, 0, 3, 26, 12, '#141210', .25);
+    ctx.fillStyle = '#6a6272'; ctx.beginPath();
+    ctx.moveTo(-30, 4); ctx.lineTo(-24, -26); ctx.lineTo(-8, -38); ctx.lineTo(10, -34); ctx.lineTo(26, -18); ctx.lineTo(30, 4); ctx.lineTo(12, 8); ctx.lineTo(-14, 8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#1a1622'; ctx.beginPath(); ctx.ellipse(0, -4, 16, 18, 0, Math.PI, 0); ctx.fill(); ctx.fillRect(-16, -4, 32, 12);
+    ctx.globalAlpha = .25 + Math.sin(t * 1.5) * .12; ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.ellipse(0, 2, 22, 12, 0, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = '#8a7256'; ctx.fillRect(22, -18, 3, 24);
+    ctx.fillStyle = '#c9a06a'; ctx.fillRect(14, -26, 20, 12);
+    ctx.font = '600 9px "Microsoft YaHei"'; ctx.textAlign = 'center'; ctx.fillStyle = '#5b4632';
+    ctx.fillText('矿洞', 24, -17);
+    ctx.font = '600 12px "Microsoft YaHei"';
+    ctx.strokeStyle = 'rgba(60,45,25,.7)'; ctx.lineWidth = 3;
+    ctx.strokeText('遗忘矿洞', 0, -52);
+    ctx.fillStyle = '#c8b8e8'; ctx.fillText('遗忘矿洞', 0, -52);
+  } else if (p.type === 'ladder_up' || p.type === 'ladder_down') {
+    // 矿洞木梯
+    ell(ctx, 0, 2, 10, 5, '#141210', .3);
+    ctx.fillStyle = '#8a6a3c'; ctx.fillRect(-9, -34, 4, 36); ctx.fillRect(5, -34, 4, 36);
+    ctx.fillStyle = '#a8845c'; for (let i = 0; i < 5; i++) ctx.fillRect(-9, -32 + i * 8, 18, 3.4);
+    ctx.font = '600 11px "Microsoft YaHei"'; ctx.textAlign = 'center';
+    ctx.strokeStyle = 'rgba(60,45,25,.7)'; ctx.lineWidth = 3;
+    const label = p.type === 'ladder_down' ? '下行梯' : '上行梯';
+    ctx.strokeText(label, 0, -44);
+    ctx.fillStyle = p.type === 'ladder_down' ? '#8ce05c' : '#ffd84c';
+    ctx.fillText(label, 0, -44);
   }
 }
