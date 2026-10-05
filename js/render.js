@@ -7,6 +7,10 @@ import { drawSpr, hasSpr } from './assets.js';
 const G_PETS = PETS;
 
 const TW = CONFIG.TILE_W, TH = CONFIG.TILE_H;
+// 地形分块缓存（16×16格/块）。等距局部角点 x∈[-480,+480]，OX=544 把负半区平移进画布
+const CHUNK = 16, OX = CHUNK * TW / 2 + TW / 2, CPADX = OX, CPADY = TH + 16;
+const CHUNK_W = OX + CHUNK * TW / 2 + TW;   // 1120
+const CHUNK_H = CHUNK * TH + CPADY * 2;     // 596
 
 export function worldToScreen(wx, wz) { return { x: (wx - wz) * TW / 2, y: (wx + wz) * TH / 2 }; }
 
@@ -381,8 +385,59 @@ export class Renderer {
     this.lightCv = document.createElement('canvas'); this.lightCtx = this.lightCv.getContext('2d');
     this.zoom = 1; this.cam = { x: 0, z: 0 };
     this.shake = 0;
+    this.chunks = new Map(); // 地形块缓存 "gcx|gcz" -> {cv}
     this.resize();
   }
+
+  getChunk(G, gcx, gcz) {
+    const key = gcx + '|' + gcz;
+    const hit = this.chunks.get(key);
+    if (hit) { hit.f = this._frame; return hit; }
+    const BN = ['water', 'sand', 'grass', 'forest', 'desert', 'snow', 'swamp', 'volcano'];
+    const cv = document.createElement('canvas');
+    cv.width = CHUNK_W; cv.height = CHUNK_H;
+    const cc = cv.getContext('2d');
+    const ox = gcx * CHUNK, oz = gcz * CHUNK;
+    for (let tz = 0; tz < CHUNK; tz++) for (let tx = 0; tx < CHUNK; tx++) {
+      const wx = ox + tx, wz = oz + tz;
+      if (wx >= G.world.W || wz >= G.world.H) continue;
+      const i = wz * G.world.W + wx;
+      const bName = BN[G.world.biome[i]];
+      const v = G.world.variant[i];
+      const h2 = (wx * 7 + wz * 13) % 5;
+      const p = worldToScreen(tx, tz); // 块内格子角点（x 可能为负，由 OX 平移）
+      const dx = p.x + OX - 48, dy = p.y + CPADY - 16;
+      cc.drawImage(getTile(bName, v, h2), dx, dy);
+      // 生态过渡柔边（上/左邻异色）
+      const upB = wz > 0 ? BN[G.world.biome[i - G.world.W]] : bName;
+      const lfB = wx > 0 ? BN[G.world.biome[i - 1]] : bName;
+      const cxp = p.x + OX, cyp = p.y + CPADY;
+      if (upB !== bName) {
+        cc.globalAlpha = .3; cc.fillStyle = tileEdgeColor(upB);
+        cc.beginPath(); cc.moveTo(cxp, cyp - 15); cc.lineTo(cxp + 30, cyp); cc.lineTo(cxp + 18, cyp + 2.5); cc.lineTo(cxp, cyp - 10); cc.closePath(); cc.fill();
+        cc.beginPath(); cc.moveTo(cxp, cyp - 15); cc.lineTo(cxp - 30, cyp); cc.lineTo(cxp - 18, cyp + 2.5); cc.lineTo(cxp, cyp - 10); cc.closePath(); cc.fill();
+        cc.globalAlpha = 1;
+      }
+      if (lfB !== bName) {
+        cc.globalAlpha = .3; cc.fillStyle = tileEdgeColor(lfB);
+        cc.beginPath(); cc.moveTo(cxp - 30, cyp); cc.lineTo(cxp, cyp + 15); cc.lineTo(cxp, cyp + 10); cc.lineTo(cxp - 18, cyp + 2.5); cc.closePath(); cc.fill();
+        cc.globalAlpha = 1;
+      }
+    }
+    const entry = { cv, f: this._frame };
+    this.chunks.set(key, entry);
+    // LRU：本帧正在用的不淘汰，防止可视块数超上限时同帧互删闪烁
+    while (this.chunks.size > 16) {
+      let oldestK = null, oldestF = Infinity;
+      for (const [k, e] of this.chunks) {
+        if (e.f < oldestF && e.f !== this._frame) { oldestF = e.f; oldestK = k; }
+      }
+      if (oldestK === null) break; // 全是本帧的，下帧再清
+      this.chunks.delete(oldestK);
+    }
+    return entry;
+  }
+
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.cv.width = this.cv.clientWidth * dpr; this.cv.height = this.cv.clientHeight * dpr;
@@ -404,6 +459,7 @@ export class Renderer {
 
   render(G) {
     const ctx = this.ctx, t = G.time;
+    this._frame = (this._frame || 0) + 1;
     this.shake = Math.max(0, this.shake - .016);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     // 天空渐变底色（随时间）
@@ -422,38 +478,32 @@ export class Renderer {
     const z0 = Math.max(0, Math.floor(cz - range)), z1 = Math.min(G.world.H - 1, Math.ceil(cz + range));
     const BIOME_NAMES = ['water', 'sand', 'grass', 'forest', 'desert', 'snow', 'swamp', 'volcano'];
 
-    // ---- 地面（预渲染 tile 贴图 + 生态过渡边） ----
+    // ---- 地面（分块缓存：地形静态，16×16格一块，LRU≤12；水面波光/农田为动态层单独画） ----
+    const gcx0 = Math.floor(x0 / CHUNK), gcx1 = Math.floor(x1 / CHUNK);
+    const gcz0 = Math.floor(z0 / CHUNK), gcz1 = Math.floor(z1 / CHUNK);
+    for (let gcz = gcz0; gcz <= gcz1; gcz++) for (let gcx = gcx0; gcx <= gcx1; gcx++) {
+      const ch = this.getChunk(G, gcx, gcz);
+      const base = worldToScreen(gcx * CHUNK, gcz * CHUNK);
+      ctx.drawImage(ch.cv, base.x - CPADX, base.y - CPADY);
+    }
+    // 动态层1：水面波光（只遍历水格）
     for (let tz = z0; tz <= z1; tz++) for (let tx = x0; tx <= x1; tx++) {
-      const i = tz * G.world.W + tx;
-      const bi = G.world.biome[i];
-      const bName = BIOME_NAMES[bi];
-      const v = G.world.variant[i];
-      const h2 = (tx * 7 + tz * 13) % 5;
-      const pc = worldToScreen(tx + .5, tz + .5);
-      const tile = getTile(bName, v, h2);
-      ctx.drawImage(tile, pc.x - 48, pc.y - 32);
-      // 生态过渡：上邻/左邻不同时叠邻色柔边
-      const upB = tz > 0 ? BIOME_NAMES[G.world.biome[i - G.world.W]] : bName;
-      const lfB = tx > 0 ? BIOME_NAMES[G.world.biome[i - 1]] : bName;
-      if (upB !== bName) {
-        ctx.globalAlpha = .3; ctx.fillStyle = tileEdgeColor(upB);
-        ctx.beginPath(); ctx.moveTo(pc.x, pc.y - 15); ctx.lineTo(pc.x + 30, pc.y); ctx.lineTo(pc.x + 18, pc.y + 2.5); ctx.lineTo(pc.x, pc.y - 10); ctx.closePath(); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(pc.x, pc.y - 15); ctx.lineTo(pc.x - 30, pc.y); ctx.lineTo(pc.x - 18, pc.y + 2.5); ctx.lineTo(pc.x, pc.y - 10); ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = 1;
+      if (G.world.biome[tz * G.world.W + tx] !== 0) continue;
+      const shim = Math.sin(t * 1.6 + tx * 1.7 + tz * 2.3) * .5 + .5;
+      if (shim > .82) {
+        const pc = worldToScreen(tx + .5, tz + .5);
+        ctx.fillStyle = `rgba(255,255,255,${(shim - .82) * 1.2})`;
+        ctx.beginPath(); ctx.ellipse(pc.x, pc.y, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
       }
-      if (lfB !== bName) {
-        ctx.globalAlpha = .3; ctx.fillStyle = tileEdgeColor(lfB);
-        ctx.beginPath(); ctx.moveTo(pc.x - 30, pc.y); ctx.lineTo(pc.x, pc.y + 15); ctx.lineTo(pc.x, pc.y + 10); ctx.lineTo(pc.x - 18, pc.y + 2.5); ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-      // 水面动画波光
-      if (bName === 'water') {
-        const shim = Math.sin(t * 1.6 + tx * 1.7 + tz * 2.3) * .5 + .5;
-        if (shim > .82) {
-          ctx.fillStyle = `rgba(255,255,255,${(shim - .82) * 1.2})`;
-          ctx.beginPath(); ctx.ellipse(pc.x, pc.y, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
-        }
-      }
+    }
+    // 动态层2：农田（作物会生长，不能烘进块缓存）
+    for (const b of G.buildings) {
+      if (b.id !== 'plot_farm') continue;
+      if (b.x < x0 - 1 || b.x > x1 + 1 || b.z < z0 - 1 || b.z > z1 + 1) continue;
+      const pc = worldToScreen(b.x + .5, b.z + .5);
+      ctx.save(); ctx.translate(pc.x, pc.y);
+      drawBuilding(ctx, 'plot_farm', b, t);
+      ctx.restore();
     }
 
     // ---- 深度排序精灵 ----
@@ -743,7 +793,7 @@ export class Renderer {
     const sc = size / W;
     for (const p of G.pois) {
       if (!p.discovered) continue;
-      mctx.fillStyle = p.type === 'altar' ? '#c86ae8' : p.type === 'ruin' ? '#e8a13c' : p.type === 'chest' && !p.opened ? '#f0c84c' : null;
+      mctx.fillStyle = p.type === 'altar' ? '#c86ae8' : p.type === 'ruin' ? '#e8a13c' : p.type === 'chest' && !p.opened ? '#f0c84c' : p.type === 'meteor' ? '#3cd8e8' : null;
       if (mctx.fillStyle) mctx.fillRect(p.x * sc - 1.5, p.z * sc - 1.5, 3, 3);
     }
     mctx.fillStyle = '#fff';

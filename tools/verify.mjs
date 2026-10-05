@@ -420,6 +420,37 @@ section('v6：异常状态/狩猎/农夫补种/夜袭重整/满包磁吸');
   ok(d0.fullT === 1, `满包停止磁吸并提示（fullT=${d0.fullT}）`);
 }
 
+// ---------------- 3.9 v7 排雷回归 ----------------
+section('v7：夜袭集合点/水壶喝水/农田可见/m14箭头');
+// 夜袭怪物不能站在水里
+{
+  for (const seed of [11, 22, 33, 44]) {
+    const Gr3 = new Game(seed);
+    Gr3.day = 6; Gr3.town.bigRaid = false;
+    Gr3.startRaid();
+    const inWater = Gr3.entities.filter(e => e.raid && Gr3.q.isWater(Math.floor(e.x), Math.floor(e.z)));
+    ok(inWater.length === 0, `种子${seed} 夜袭集合点不在水中（水中${inWater.length}只）`);
+  }
+}
+// 水壶：有水先喝，空了才能灌
+{
+  const Gw = new Game(99);
+  Gw.player.inv = new Array(40).fill(null);
+  Gw.player.inv[0] = { id: 'waterskin', n: 1 };
+  Gw.player.skinCharges = 3;
+  Gw.player.thirst = 40; // 先压低才能看出喝水效果
+  Gw.useItem(0);
+  ok(Gw.player.skinCharges === 2 && Gw.player.thirst > 60, `水壶喝水（40→${Math.round(Gw.player.thirst)}，剩${Gw.player.skinCharges}口）`);
+}
+// m14：祭坛建成后箭头指向祭坛
+{
+  const Gm = new Game(111);
+  Gm.mainIdx = 13; Gm._arrowByTut = false; Gm._arrowT = -9;
+  Gm.placeBuilding('altar_ancient', Gm.world.center.x, Gm.world.center.z + 3, true);
+  Gm.checkQuests();
+  ok(Gm.guideArrow && Gm.guideArrow.label && Gm.guideArrow.label.includes('远古祭坛'), `m14箭头指向祭坛（${Gm.guideArrow && Gm.guideArrow.label}）`);
+}
+
 // ---------------- 4. 汇总 ----------------
 console.log(`\n========================\n✅ 通过 ${pass} 项 · ❌ 失败 ${fail} 项\n========================`);
 process.exit(fail ? 1 : 0);

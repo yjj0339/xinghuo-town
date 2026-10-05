@@ -709,9 +709,14 @@ export class Game {
         }
         const bid = { m11: 'goblin_king', m14: 'treant_ancient' }[mq.id];
         if (bid && !this.stats['boss_' + bid]) {
-          const a = this.pois.find(x => x.type === 'altar' && x.id === bid) || (mq.id === 'm14' ? null : null);
+          const a = this.pois.find(x => x.type === 'altar' && x.id === bid);
           if (a) return { x: a.x + .5, z: a.z + .5, label: MONSTERS[bid].n + ' 👹' };
-          if (mq.id === 'm14' && !this.buildCounts.altar_ancient) return { x: this.townCenter.x, z: this.townCenter.z, label: '在家建造远古祭坛 🔮' };
+          // m14：远古祭坛建好后指向祭坛
+          if (mq.id === 'm14') {
+            const altar = this.buildings.find(b => b.id === 'altar_ancient');
+            if (altar) return { x: altar.x + .5, z: altar.z + .5, label: '远古祭坛 🔮' };
+            return { x: this.townCenter.x, z: this.townCenter.z, label: '在家建造远古祭坛 🔮' };
+          }
         }
         return null;
       }
@@ -935,16 +940,23 @@ export class Game {
   startRaid() {
     const big = this.town.bigRaid;
     const n = Math.min(24, 3 + this.town.lv * 2 + Math.floor(this.day / 5) + (big ? 6 : 0));
-    const dirs = this.rng() * Math.PI * 2;
-    const ex = this.townCenter.x + Math.cos(dirs) * (CONFIG.TOWN_RADIUS + 6);
-    const ez = this.townCenter.z + Math.sin(dirs) * (CONFIG.TOWN_RADIUS + 6);
+    // 找一块不在水里的集合点（否则怪物卡湖里夜袭失败）
+    let ex = 0, ez = 0;
+    for (let k = 0; k < 12; k++) {
+      const ang = this.rng() * Math.PI * 2;
+      ex = this.townCenter.x + Math.cos(ang) * (CONFIG.TOWN_RADIUS + 6);
+      ez = this.townCenter.z + Math.sin(ang) * (CONFIG.TOWN_RADIUS + 6);
+      if (!this.q.isWater(Math.floor(ex), Math.floor(ez))) break;
+    }
     const pool = [];
     const nearBiome = this.q.biomeAt(Math.floor(ex), Math.floor(ez));
     for (const id of (BIOMES[nearBiome]?.mon || []).slice(0, 3)) pool.push(id);
     pool.push('zombie', 'skeleton');
     for (let i = 0; i < n; i++) {
       const id = pool[Math.floor(this.rng() * pool.length)];
-      const m = makeMonster(id, ex + (this.rng() - .5) * 5, ez + (this.rng() - .5) * 5, { raid: true, hpMul: 1 + this.day * .02 });
+      let mx = ex + (this.rng() - .5) * 5, mz = ez + (this.rng() - .5) * 5;
+      if (this.q.isWater(Math.floor(mx), Math.floor(mz))) { mx = ex; mz = ez; } // 散布落水则收回集合点
+      const m = makeMonster(id, mx, mz, { raid: true, hpMul: 1 + this.day * .02 });
       this.entities.push(m);
     }
     if (big && this.day % 10 === 0) {
@@ -1034,8 +1046,14 @@ export class Game {
     if (nearFire) temp += 10;
     const comfort = temp + warm * 3;
     p.temp = Math.round(temp);
-    if (comfort < 0) { p.hp -= dt * 1.2; if (this.rng() < dt * .2) this.toast('🥶 太冷了！靠近篝火或穿上保暖衣物'); }
-    if (comfort > 45) { p.hp -= dt * 1.2; if (this.rng() < dt * .2) this.toast('🥵 太热了！去凉快点的地方'); }
+    if (comfort < 0) {
+      p.hp -= dt * 1.2;
+      if (this.time - (this._tempT || -9) > 8) { this._tempT = this.time; this.toast('🥶 太冷了！靠近篝火或穿上保暖衣物'); }
+    }
+    if (comfort > 45) {
+      p.hp -= dt * 1.2;
+      if (this.time - (this._tempT || -9) > 8) { this._tempT = this.time; this.toast('🥵 太热了！去凉快点的地方'); }
+    }
     if (p.hunger <= 0 || p.thirst <= 0) p.hp -= dt * 1.5;
     if (p.hunger > 30 && p.thirst > 30 && p.hp < p.maxHp && comfort > 0 && comfort < 45) p.hp = Math.min(p.maxHp, p.hp + dt * .8);
     if (p.fx.burn) p.hp -= dt * 3;
@@ -1445,11 +1463,19 @@ export class Game {
       }
     }
     if (slot.id === 'waterskin') {
+      // 有水先喝（灌满可喝3次），空了才需要补水
+      if (p.skinCharges > 0) {
+        p.skinCharges--;
+        p.thirst = Math.min(100, p.thirst + 30);
+        this.toast(`💧 喝了水壶的水（还剩 ${p.skinCharges} 口）`);
+        this.sfx('drink');
+        return true;
+      }
       const tx = Math.floor(p.x), tz = Math.floor(p.z);
       let near = this.q.isWater(tx + 2, tz) || this.q.isWater(tx - 2, tz) || this.q.isWater(tx, tz + 2) || this.q.isWater(tx, tz - 2);
       near = near || this.buildings.some(b => (b.id === 'well') && Math.hypot(b.x - tx, b.z - tz) < 3);
-      if (near) { p.skinCharges = 3; this.toast('💧 灌满了水壶（可喝3次）'); return true; }
-      this.toast('要在水边或水井旁才能灌水'); return false;
+      if (near) { p.skinCharges = 3; this.toast('💧 灌满了水壶（可喝3口）'); this.sfx('drink'); return true; }
+      this.toast('水壶空了——到水边或水井旁才能灌水'); return false;
     }
     // 装备
     if (it.arm) { this.equip(slot.id); return true; }
