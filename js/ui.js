@@ -199,8 +199,10 @@ export class UI {
       this.renderTutCard();
       return;
     }
-    // 指引箭头（教程箭头优先于主线箭头）
+    // 指引箭头（教程箭头优先于主线箭头；0.5s 节流，避免每帧扫 2400 格）
     G._arrowByTut = true;
+    if (G.time - (G._tutArrowT || -9) < .5) return;
+    G._tutArrowT = G.time;
     G.guideArrow = null;
     if (step.arrow === 'tree' || step.arrow === 'rock') {
       const t = this.findNearestObj(step.arrow === 'tree' ? ['tree', 'tree_pine', 'tree_big', 'apple_tree'] : ['rock', 'rock_sand', 'ore_copper', 'ore_coal']);
@@ -363,6 +365,8 @@ export class UI {
     const el = document.getElementById('panel');
     // 用户正在操作下拉框时避免重绘打断
     if (document.activeElement && document.activeElement.tagName === 'SELECT' && el.contains(document.activeElement)) return;
+    const body = el.querySelector('.panel-body');
+    const keepScroll = body ? body.scrollTop : 0;
     const H = {
       inventory: () => this.htmlInventory(), craft: () => this.htmlCraft(), build: () => this.htmlBuild(),
       quests: () => this.htmlQuests(), town: () => this.htmlTown(), codex: () => this.htmlCodex(),
@@ -370,6 +374,9 @@ export class UI {
       trade: () => this.htmlTrade(), daily: () => this.htmlQuests('daily'),
     }[this.activePanel];
     if (H) { el.innerHTML = `<div class="panel-head"><b>${PANEL_TITLES[this.activePanel]}</b><button class="close" id="panel-close">✕</button></div><div class="panel-body">${H()}</div>`; }
+    // 恢复滚动位置（面板每0.25s刷新，不保留的话列表根本没法滑）
+    const body2 = el.querySelector('.panel-body');
+    if (body2 && keepScroll) body2.scrollTop = keepScroll;
     document.getElementById('panel-close').onclick = () => this.closePanel();
     this.bindPanel();
   }
@@ -415,9 +422,10 @@ export class UI {
           case 'take': { const s = G.town.storage[+a1]; if (s && G.give(s.id, s.n)) G.town.storage[+a1] = null; break; }
           case 'takeall': { for (let i = 0; i < G.town.storage.length; i++) { const s = G.town.storage[i]; if (s && G.give(s.id, s.n)) G.town.storage[i] = null; } break; }
           case 'storeall': {
+            const eqIds = Object.values(G.player.equip).filter(Boolean);
             let stored = 0;
-            for (let i = 0; i < G.player.inv.length; i++) { const s = G.player.inv[i]; if (s && G.addStorage(s.id, s.n)) { G.take(s.id, s.n); stored++; } }
-            G.toast(stored ? `已把 ${stored} 格背包存入小镇仓库` : '背包没有可存的东西（或仓库满了）');
+            for (let i = 0; i < G.player.inv.length; i++) { const s = G.player.inv[i]; if (s && !eqIds.includes(s.id) && G.addStorage(s.id, s.n)) { G.take(s.id, s.n); stored++; } }
+            G.toast(stored ? `已把 ${stored} 格背包存入小镇仓库（身上的装备保留）` : '背包没有可存的东西（或仓库满了）');
             break;
           }
           case 'store': { const s = G.player.inv[+a1]; if (s && G.addStorage(s.id, s.n)) G.take(s.id, s.n); break; }
@@ -688,9 +696,10 @@ export class UI {
         <button class="craft-btn ${G.player.coins >= price ? '' : 'dis'}" data-act="buy" data-a1="${id}">买1</button>
         <button class="craft-btn ${G.player.coins >= price * 5 ? '' : 'dis'}" data-act="buy5" data-a1="${id}">买5</button></div>`;
     }
-    // 出售：聚合背包
+    // 出售：聚合背包（跳过身上正穿着/手持的装备）
+    const equippedIds = Object.values(G.player.equip).filter(Boolean);
     const agg = {};
-    for (const s of G.player.inv) if (s) agg[s.id] = (agg[s.id] || 0) + s.n;
+    for (const s of G.player.inv) if (s && !equippedIds.includes(s.id)) agg[s.id] = (agg[s.id] || 0) + s.n;
     let sell = '';
     for (const [id, n] of Object.entries(agg)) {
       if (!ITEMS[id].p) continue;

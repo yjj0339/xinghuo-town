@@ -166,9 +166,12 @@ export function updateMonster(G, e, dt) {
           const kind = e.type === 'banshee' ? 'ice' : e.type === 'ice_queen' ? 'ice' : e.type === 'demon_imp' ? 'fire' : 'bolt';
           G.spawnProjectile(e.x, e.z, target.x, target.z, kind, m.dmg, 'monster', e.type === 'ice_queen' || e.type === 'banshee' ? 'slow' : (e.type === 'demon_imp' ? 'burn' : null));
         }
-      } else if (e.atkCd <= 0) {
+      }
+      // 近战怪命中附带异常（熔岩史莱姆灼烧/毒蘑菇中毒/冰系减速）
+      if (!m.ranged && e.atkCd <= 0) {
         e.atkCd = m.boss ? 1.4 : 1.1; e.atkT = .25;
-        G.hitEntity(e, target, m.dmg);
+        const effect = m.burn ? 'burn' : m.poison ? 'poison' : m.slow ? 'slow' : null;
+        G.hitEntity(e, target, m.dmg, undefined, effect);
       }
     }
     // 袭击时破坏挡路建筑（被摧毁不返还材料）
@@ -231,8 +234,7 @@ export function updateAnimal(G, e, dt) {
     e.fleeT -= dt;
     const th = e.threat; if (th) moveEntity(G, e, e.x - th.x, e.z - th.z, dt * 1.4);
     return;
-  }
-  if (e.follow) { // 被饲料引诱
+  }  if (e.follow) { // 被饲料引诱
     const p = G.player;
     const d = dist(e, p);
     if (d > 1.4) moveEntity(G, e, p.x - e.x, p.z - e.z, dt);
@@ -307,9 +309,14 @@ export function updateNPC(G, e, dt) {
         if (e.workT <= 0) {
           e.workT = 2 / eff;
           const b = G.buildingAt(t.x, t.z);
-          if (!b || !b.crop) { e.target = null; return; }
-          if (b.crop.growth >= 1) {
+          if (!b || b.id !== 'plot_farm') { e.target = null; return; }
+          if (b.crop && b.crop.growth >= 1) {
             G.harvestCrop(b, true); e.target = null;
+          } else if (!b.crop) {
+            // 空田自动补种：从仓库取当季种子
+            e.atkT = .3;
+            G.farmerPlant(b);
+            e.target = null;
           } else {
             b.crop.watered = true; e.atkT = .3; G.particles && G.particles.push({ x: t.x + .5, z: t.z + .5, t: 0, kind: 'drop' });
             e.target = null;
@@ -377,13 +384,17 @@ export function updateDrop(G, d, dt) {
   d.t += dt;
   const p = G.player;
   const dd = Math.hypot(d.x - p.x, d.z - p.z);
-  if (d.t > .4 && dd < 1.6) { // 磁吸
+  if (d.t > .4 && dd < 1.6 && !d.fullT) { // 磁吸（背包满时停止）
     d.x += (p.x - d.x) * dt * 8; d.z += (p.z - d.z) * dt * 8;
   }
-  if (d.t > .4 && dd < .55) {
+  if (d.t > .4 && dd < .55 && !d.fullT) {
     if (addItem(p.inv, d.item, d.n)) {
       d.dead = true; G.sfx('pick'); G.bus('gather', d.item, d.n);
       G.floaters.push({ x: p.x, z: p.z, y: -40, text: `+${d.n} ${ITEMS[d.item]?.n || d.item}`, color: '#ffe08a', life: .9 });
+    } else {
+      d.fullT = 1;
+      G.toast('🎒 背包满了！先整理或把东西存进小镇仓库');
+      G.sfx('hurt');
     }
   }
   if (d.t > 300) d.dead = true;
@@ -397,7 +408,7 @@ export function updateProjectile(G, pr, dt) {
   // 命中判定
   if (pr.from === 'player' || pr.from === 'tower') {
     for (const e of G.entities) {
-      if (e.kind !== 'monster') continue;
+      if (e.kind !== 'monster' && !(pr.from === 'player' && e.kind === 'animal' && !e.follow)) continue;
       if (Math.hypot(e.x - pr.x, e.z - pr.z) < e.r + .35) {
         if (pr.aoe) G.explode(pr); else G.hitEntity(pr.owner || G.player, e, pr.dmg, pr.from, pr.effect);
         pr.dead = true; return;
@@ -434,11 +445,11 @@ export function playerAttack(G, p) {
     if (p.equip.hand === 'bomb') { removeItem(p.inv, 'bomb', 1); G.autoUnequipIfEmpty('bomb'); }
     return;
   }
-  // 近战扇形
+  // 近战扇形（可狩猎野生动物）
   const dx = p.dir === 1 ? -1 : p.dir === 2 ? 1 : 0, dz = p.dir === 0 ? 1 : p.dir === 3 ? -1 : 0;
   let hitAny = false;
   for (const e of G.entities) {
-    if (e.kind !== 'monster') continue;
+    if (e.kind !== 'monster' && !(e.kind === 'animal' && !e.follow)) continue;
     const ex = e.x - p.x, ez = e.z - p.z;
     const d = Math.hypot(ex, ez);
     if (d < wpn.range + e.r && (ex * dx + ez * dz) / (d || 1) > .3) {

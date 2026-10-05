@@ -7,7 +7,7 @@ globalThis.localStorage = { _m: {}, getItem(k) { return this._m[k] ?? null }, se
 import { ITEMS, RECIPES, BUILDINGS, MONSTERS, ANIMALS, CROPS, WORLD_OBJECTS, MAIN_QUESTS, SIDE_QUESTS, DAILY_POOL, ACHIEVEMENTS, SKILLS, MERCHANT, FISH_TABLE, BIOMES, RANDOM_EVENTS, CONFIG } from '../js/data.js';
 import { genWorld, makeQueries, BIOME_IDS } from '../js/world.js';
 import { Game } from '../js/systems.js';
-import { xpNeed, addItem, countItem } from '../js/entities.js';
+import { xpNeed, addItem, countItem, playerAttack } from '../js/entities.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, name) => { if (cond) { pass++; } else { fail++; console.error('  ❌ ' + name); } };
@@ -350,6 +350,74 @@ section('v5：暗影瞬移/夜晚实体/箭头节流回归');
   ok(true, '高频事件调用不抛错');
   G.checkQuests();
   ok(G.guideArrow !== undefined, '箭头缓存仍可用');
+}
+
+// ---------------- 3.8 v6 排雷回归 ----------------
+section('v6：异常状态/狩猎/农夫补种/夜袭重整/满包磁吸');
+// 近战元素怪命中施加异常（走真实 AI 路径：怪物靠近并攻击玩家）
+{
+  const Gl = new Game(555);
+  const { makeMonster: mm } = await import('../js/entities.js');
+  const lava = mm('slime_lava', Gl.player.x + 2, Gl.player.z, {});
+  Gl.entities.push(lava);
+  let burned = false;
+  for (let i = 0; i < 200 && !burned; i++) { Gl.update(.1); burned = (Gl.player.fx.burn || 0) > 0; }
+  ok(burned, `熔岩史莱姆近战带灼烧（真实路径）`);
+  // 毒蘑菇中毒（新开局避开无敌帧干扰）
+  const Gp = new Game(556);
+  const mush = mm('mush_toxic', Gp.player.x + 2, Gp.player.z, {});
+  Gp.entities.push(mush);
+  let poisoned = false;
+  for (let i = 0; i < 200 && !poisoned; i++) { Gp.update(.1); poisoned = (Gp.player.fx.poison || 0) > 0; }
+  ok(poisoned, '毒蘑菇近战带中毒');
+}
+// 狩猎：近战可打野生鹿并掉落
+{
+  const Gh2 = new Game(556);
+  const { makeAnimal: ma } = await import('../js/entities.js');
+  const deer = ma('deer', Gh2.player.x + .8, Gh2.player.z);
+  Gh2.entities.push(deer);
+  Gh2.player.equip.hand = 'sword_iron';
+  Gh2.player.dir = 2; // 面朝 +x，鹿在东边
+  Gh2.player.atkCd = 0;
+  playerAttack(Gh2, Gh2.player);
+  ok(deer.hp < deer.maxHp || deer.dead, `近战命中野生鹿（hp ${deer.hp}/${deer.maxHp}${deer.dead ? ' 已死' : ''}）`);
+}
+// 农夫自动补种
+{
+  const Gf = new Game(557);
+  const cc = Gf.world.center;
+  Gf.placeBuilding('plot_farm', cc.x + 2, cc.z, true);
+  Gf.addStorage('seed_wheat', 3);
+  Gf.addSettler('老农', 'farmer');
+  let planted = false;
+  for (let i = 0; i < 600 && !planted; i++) { Gf.update(.1); planted = !!Gf.buildingAt(cc.x + 2, cc.z)?.crop; }
+  ok(planted, `农夫从仓库取种补种（${planted ? Gf.buildingAt(cc.x + 2, cc.z).crop.id : '未种'}）`);
+  ok(Gf.storageCount('seed_wheat') === 2, `仓库种子被消耗（剩${Gf.storageCount('seed_wheat')}）`);
+}
+// 夜袭中存档重进 → 今晚重新来袭
+{
+  localStorage.setItem(CONFIG.SAVE_KEY, JSON.stringify({
+    v: 1, seed: 42, day: 5, dayTime: .7, weather: 'sunny', time: 1,
+    player: { x: 5, z: 5, hp: 100, maxHp: 100, hunger: 80, thirst: 80, energy: 80, coins: 10, xp: 0, level: 1, skillPts: 0, skills: {}, inv: new Array(40).fill(null), equip: {} },
+    buildings: [], pois: [], npcs: [], housed: [],
+    town: { lv: 1, storage: new Array(20).fill(null), raidActive: true },
+    stats: {}, codex: {}, settings: { sfx: false },
+  }));
+  const Gr2 = new Game(42);
+  Gr2.applySave(JSON.parse(localStorage.getItem(CONFIG.SAVE_KEY)));
+  ok(Gr2.town.raidTonight === true && Gr2.town.raidActive === false, `夜袭读档重整（raidTonight=${Gr2.town.raidTonight}）`);
+  ok(Gr2.settings.autoAtk === true && Gr2.settings.sfx === false, '旧存档设置合并默认值（自动攻击不丢）');
+}
+// 背包满：掉落物停止磁吸并提示
+{
+  const Gd = new Game(558);
+  Gd.player.inv = new Array(40).fill(null);
+  for (let i = 0; i < 40; i++) Gd.player.inv[i] = { id: 'stone', n: 99 };
+  Gd.spawnDrop(Gd.player.x + .2, Gd.player.z, 'wood', 1);
+  const d0 = Gd.drops[0];
+  for (let i = 0; i < 20; i++) Gd.update(.1);
+  ok(d0.fullT === 1, `满包停止磁吸并提示（fullT=${d0.fullT}）`);
 }
 
 // ---------------- 4. 汇总 ----------------

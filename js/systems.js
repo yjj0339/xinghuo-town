@@ -1506,7 +1506,7 @@ export class Game {
         pois: this.pois.map(x => ({ ...x })),
         npcs: this.entities.filter(e => e.kind === 'npc').map(e => ({ name: e.name, job: e.job, x: e.x, z: e.z, happiness: e.happiness, escorting: e.escorting })),
         housed: this.housedAnimals.map(h => ({ type: h.type, bx: h.b.x, bz: h.b.z, lastDay: h.lastDay })),
-        town: { lv: this.town.lv, storage: this.town.storage, merchantDay: this.town.merchantDay, raidTonight: this.town.raidTonight },
+        town: { lv: this.town.lv, storage: this.town.storage, merchantDay: this.town.merchantDay, raidTonight: this.town.raidTonight, raidActive: this.town.raidActive },
         stats: this.stats, claimedSides: this.claimedSides, mainIdx: this.mainIdx, dailies: this.dailies,
         codex: this.codex, settings: this.settings, unlockedAch: this.unlockedAch ? [...this.unlockedAch] : [],
         pet: this.pet ? this.pet.type : null, wallTime: Date.now(), cookedKinds: this._cookedKinds ? [...this._cookedKinds] : [],
@@ -1545,6 +1545,11 @@ export class Game {
     }
     this.housedAnimals = d.housed.map(h => ({ type: h.type, b: this.buildings.find(b => b.x === h.bx && b.z === h.bz), lastDay: h.lastDay })).filter(h => h.b);
     Object.assign(this.town, d.town);
+    // 夜袭中存档重进：今晚重新来袭（防止读档白嫖跳过夜袭）
+    if (this.town.raidActive) {
+      this.town.raidActive = false;
+      if (this.dayTime >= .5) this.town.raidTonight = true;
+    }
     this.stats = d.stats || {}; this.claimedSides = d.claimedSides || []; this.mainIdx = d.mainIdx || 0; this.dailies = d.dailies || [];
     this.codex = d.codex || this.codex;
     this.settings = Object.assign({ sfx: true, dmgNum: true, autoAtk: true }, d.settings || {});
@@ -1581,11 +1586,29 @@ export class Game {
     return null;
   }
   findFarmWork() {
-    const plots = this.buildings.filter(b => b.id === 'plot_farm' && b.crop);
-    const dry = plots.find(b => b.crop.growth < 1 && !b.crop.watered);
+    const plots = this.buildings.filter(b => b.id === 'plot_farm');
+    // 优先级：空田（补种）> 缺水 > 成熟
+    const empty = plots.find(b => !b.crop);
+    if (empty && this.storageSeeds().length) return { x: empty.x, z: empty.z };
+    const dry = plots.find(b => b.crop && b.crop.growth < 1 && !b.crop.watered);
     if (dry) return { x: dry.x, z: dry.z };
-    const ripe = plots.find(b => b.crop.growth >= 1);
+    const ripe = plots.find(b => b.crop && b.crop.growth >= 1);
     if (ripe) return { x: ripe.x, z: ripe.z };
     return null;
+  }
+  storageSeeds() {
+    return Object.keys(ITEMS).filter(id => ITEMS[id].seed && this.storageCount(id) > 0);
+  }
+  farmerPlant(b) {
+    const season = this.seasonIdx();
+    for (const sid of this.storageSeeds()) {
+      const crop = ITEMS[sid].seed.crop;
+      if (CROPS[crop] && CROPS[crop].seasons.includes(season) && this.takeStorage(sid, 1)) {
+        b.crop = { id: crop, growth: 0, watered: true };
+        this.sfx('plant');
+        return true;
+      }
+    }
+    return false;
   }
 }
