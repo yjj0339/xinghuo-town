@@ -188,6 +188,17 @@ export function drawWorldObject(ctx, o, wx, wz, time) {
   const def = WORLD_OBJECTS[o.id]; if (!def) return;
   const sway = Math.sin(time * 1.2 + wx * 2.1 + wz * 1.3) * .03;
   const hit = o.hitT > 0;
+  const h = hasSpr(o.id) ? hOf(o.id) : 40;
+  // 采集进度条（受损时显示）
+  if (o.hp < def.hp) {
+    const pct = Math.max(0, o.hp / def.hp);
+    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    ctx.beginPath(); ctx.roundRect(-14, -h - 10, 28, 5, 3); ctx.fill();
+    ctx.fillStyle = '#FFC64D';
+    ctx.beginPath(); ctx.roundRect(-14, -h - 10, 28 * pct, 5, 3); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(-14, -h - 10, 28, 5, 3); ctx.stroke();
+  }
   if (hasSpr(o.id)) {
     const isTree = o.id.startsWith('tree') || o.id === 'apple_tree';
     drawSpr(ctx, o.id, hOf(o.id), {
@@ -198,6 +209,7 @@ export function drawWorldObject(ctx, o, wx, wz, time) {
     return;
   }
   ctx.save();
+  ctx.translate(0, -0);
   if (hit) ctx.translate(Math.sin(time * 60) * 2.5, 0);
   // —— 程序回退（草丛/花丛等小物件）
   switch (o.id) {

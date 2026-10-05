@@ -50,8 +50,8 @@ export class Game {
     this.nightKillsPool = 0;
     this.buildCounts = {};
     this.version = CONFIG.VERSION;
-    // 初始物资
-    addItem(this.player.inv, 'wood', 5); addItem(this.player.inv, 'fiber', 3); addItem(this.player.inv, 'berry', 3);
+    // 初始物资：刚好够做木斧+木镐，避免开局卡死
+    addItem(this.player.inv, 'wood', 8); addItem(this.player.inv, 'fiber', 6); addItem(this.player.inv, 'berry', 3);
   }
 
   // ---------- 基础查询 ----------
@@ -634,12 +634,11 @@ export class Game {
     const mq = this.mainQuest();
     if (!mq) return null;
     switch (mq.id) {
-      case 'm1': {
-        if (this.count('wood') + (this.stats.gather_wood || 0) < 8) { const t = near(['tree', 'tree_pine', 'tree_big', 'apple_tree']); if (t) return { ...t, label: '采集木头 🪓' }; }
-        const t2 = near(['rock', 'rock_sand']); if (t2) return { ...t2, label: '采集石头 ⛏️' };
+      case 'm2': {
+        if (this.count('wood') + (this.stats.gather_wood || 0) < 8) { const t = near(['tree', 'tree_pine', 'tree_big', 'apple_tree']); if (t) return { ...t, label: '砍树 🪓' }; }
+        const t2 = near(['rock', 'rock_sand']); if (t2) return { ...t2, label: '挖石 ⛏️' };
         return null;
       }
-      case 'm2': return null;
       case 'm8': {
         const s = this.pois.find(x => x.type === 'survivor' && !x.rescued);
         return s ? { x: s.x + .5, z: s.z + .5, label: '幸存者 🧑' } : null;
@@ -1124,14 +1123,15 @@ export class Game {
     const p = this.player;
     let best = null, bd = 1.9;
     // 掉落物（自动拾取，无需目标）
-    // 世界物体
+    // 世界物体（高价值目标优先：树/石/矿/浆果 > 草丛花丛芦苇）
+    const LOW_VAL = ['grass_tuft', 'flower_patch', 'reeds', 'bush_herb'];
     const tx = Math.floor(p.x), tz = Math.floor(p.z);
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       const x = tx + dx, z = tz + dz;
       if (!this.q.inBounds(x, z)) continue;
       const o = this.world.obj[z * this.world.W + x];
       if (o && o.id) {
-        const d = Math.hypot(x + .5 - p.x, z + .5 - p.z);
+        const d = Math.hypot(x + .5 - p.x, z + .5 - p.z) + (LOW_VAL.includes(o.id) ? .9 : 0);
         if (d < bd) { bd = d; best = { kind: 'obj', x: x + .5, z: z + .5, obj: o, tx: x, tz: z }; }
       }
       const b = this.buildingAt(x, z);
@@ -1169,8 +1169,11 @@ export class Game {
     if (!t) return '';
     if (t.kind === 'obj') {
       const def = WORLD_OBJECTS[t.obj.id];
-      const need = def.tool[1] > 0 ? def.tool : null;
-      return def.n + (need ? `（需${{ axe: '斧', pick: '镐', shovel: '铲' }[need[0]] || ''}T${need[1]}）` : '');
+      const [kind, tier] = def.tool;
+      const needTool = tier > 1; // T1 徒手可采，只提示
+      if (needTool) return def.n + `（需${{ axe: '斧', pick: '镐', shovel: '铲' }[kind] || '工具'}T${tier}）`;
+      if (kind) return def.n + `（连按E采集）`;
+      return def.n + '（按E采集）';
     }
     if (t.kind === 'bld') {
       const def = BUILDINGS[t.b.id];
@@ -1194,11 +1197,23 @@ export class Game {
     if (t.kind === 'obj') {
       const def = WORLD_OBJECTS[t.obj.id];
       const [kind, tier] = def.tool;
+      let dmg = (1 + (p.skills.sharp_tools || 0) * .2) * (1 + this.petBuff('gather'));
       if (kind) {
         const tool = bestTool(p.inv, kind);
-        if (!tool || ITEMS[tool].tool.tier < tier) { this.toast(`需要${{ axe: '斧', pick: '镐', shovel: '铲' }[kind]}（T${tier}）`); return false; }
+        if (!tool || ITEMS[tool].tool.tier < tier) {
+          // T1 资源允许徒手采集（很慢），T2+ 仍然需要工具
+          if (tier <= 1) {
+            dmg *= .3;
+            if ((this._toolHintT || 0) < this.time) {
+              this._toolHintT = this.time + 4;
+              this.toast(`💡 徒手${kind === 'axe' ? '砍' : '挖'}很慢，做一把${{ axe: '木斧', pick: '木镐', shovel: '铲' }[kind] || '工具'}会快得多（制作菜单）`);
+            }
+          } else {
+            this.toast(`需要${{ axe: '斧', pick: '镐', shovel: '铲' }[kind]}（T${tier}）`);
+            return false;
+          }
+        }
       }
-      const dmg = (1 + (p.skills.sharp_tools || 0) * .2) * (1 + this.petBuff('gather'));
       t.obj.hp -= dmg; t.obj.hitT = .2;
       this.sfx(kind === 'axe' ? 'chop' : kind === 'pick' ? 'mine' : 'dig');
       this.particles.push({ x: t.x, z: t.z, y: -18, t: 0, kind: kind === 'axe' ? 'leaf' : 'spark', vx: (this.rng() - .5) * 2, vz: (this.rng() - .5) * 2 });

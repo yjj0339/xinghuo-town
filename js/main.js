@@ -222,6 +222,11 @@ function tick(now) {
     }
   }
   if (G.interactPress) { G.interactPress = false; G.interact(); }
+  // 长按互动连发（手机✋/键盘E按住）
+  if (G.interactHold || keys['e']) {
+    G.interactHoldT = (G.interactHoldT || 0) - dt;
+    if (G.interactHoldT <= 0) { G.interactHoldT = .3; G.interact(); }
+  } else G.interactHoldT = 0;
   targT -= dt;
   if (targT <= 0) { targT = .15; G.target = G.interactTarget(); }
   if (ui.buildSel) {

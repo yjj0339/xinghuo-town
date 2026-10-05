@@ -445,8 +445,8 @@ export const MERCHANT = {
 // ---------------- 主线任务 ----------------
 // type: gather(持有即可)/kill/build/craft/recruit/town/coins/boss/plant/eat/fish/house/night_kills
 export const MAIN_QUESTS = [
-  { id: 'm1',  n: '拾荒营地',   desc: '收集 8 木头、5 石头，并建造一座篝火', goals: [{ t: 'gather', item: 'wood', n: 8 }, { t: 'gather', item: 'stone', n: 5 }, { t: 'build', b: 'campfire', n: 1 }], reward: { items: [['fiber', 6]], coins: 10, xp: 30 } },
-  { id: 'm2',  n: '简易工具',   desc: '制作一把木斧和一把木镐', goals: [{ t: 'craft', item: 'axe_wood', n: 1 }, { t: 'craft', item: 'pick_wood', n: 1 }], reward: { items: [['plank', 4]], xp: 40 } },
+  { id: 'm1',  n: '简易工具',   desc: '用初始物资制作一把木斧和一把木镐（打开「制作」面板）', goals: [{ t: 'craft', item: 'axe_wood', n: 1 }, { t: 'craft', item: 'pick_wood', n: 1 }], reward: { items: [['fiber', 6], ['berry', 4]], xp: 40 } },
+  { id: 'm2',  n: '拾荒营地',   desc: '用工具砍树挖石（8木5石），并建造一座篝火', goals: [{ t: 'gather', item: 'wood', n: 8 }, { t: 'gather', item: 'stone', n: 5 }, { t: 'build', b: 'campfire', n: 1 }], reward: { items: [['plank', 4]], coins: 10, xp: 30 } },
   { id: 'm3',  n: '工作台',     desc: '建造一座工作台', goals: [{ t: 'build', b: 'bench_work', n: 1 }], reward: { items: [['stone', 10]], coins: 20, xp: 50 } },
   { id: 'm4',  n: '遮风挡雨',   desc: '用 6 面木墙和 1 扇木门围出你的小窝', goals: [{ t: 'build', b: 'wall_wood', n: 6 }, { t: 'build', b: 'gate_wood', n: 1 }], reward: { coins: 40, xp: 60, unlockTip: '床与木箱已可建造' } },
   { id: 'm5',  n: '温饱一线',   desc: '采 6 个浆果，并进食 2 次', goals: [{ t: 'gather', item: 'berry', n: 6 }, { t: 'eat', n: 2 }], reward: { items: [['seed_wheat', 4], ['seed_carrot', 2]], xp: 60 } },

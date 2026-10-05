@@ -184,6 +184,33 @@ for (let i = 0; i < 500; i++) G2.update(.1);
 
 // ---------------- 3.5 v3 新系统 ----------------
 section('v3：宠物/离线收益/徽章/新内容');
+// 徒手采集（新手不死锁）
+{
+  const Gh = new Game(4242);
+  // 找玩家附近最近的一棵树
+  let tree = null;
+  const px = Math.floor(Gh.player.x), pz = Math.floor(Gh.player.z);
+  for (let r = 1; r < 40 && !tree; r++) {
+    for (let dz = -r; dz <= r && !tree; dz++) for (let dx = -r; dx <= r && !tree; dx++) {
+      const x = px + dx, z = pz + dz;
+      if (!Gh.q.inBounds(x, z)) continue;
+      const o = Gh.world.obj[z * Gh.world.W + x];
+      if (o && ['tree', 'tree_pine', 'tree_big'].includes(o.id)) tree = { x, z, o };
+    }
+  }
+  ok(!!tree, '找到一棵测试用树');
+  if (tree) {
+    // 玩家站到树旁，清空背包工具
+    Gh.player.inv = new Array(40).fill(null);
+    Gh.player.x = tree.x + 1.5; Gh.player.z = tree.z + .5;
+    Gh.target = Gh.interactTarget();
+    ok(Gh.target && Gh.target.kind === 'obj' && Gh.target.tx === tree.x && Gh.target.tz === tree.z, `目标锁定为树（${Gh.target && Gh.target.kind === 'obj' ? Gh.target.obj.id : JSON.stringify(Gh.target)}）`);
+    const hp0 = tree.o.hp;
+    const chopped = Gh.interact();
+    ok(chopped === true && tree.o.hp < hp0, `徒手砍树有效（${hp0}→${tree.o.hp}）`);
+    ok(Gh.labelForTarget(Gh.target).includes('连按'), '目标标签提示连按');
+  }
+}
 ok(G.adoptPet('chick') === true, '收养小鸡跟宠');
 ok(G.petBuff('gather') > 0, '跟宠采集加成生效');
 ok(G.petBuff('power') === 0, '跟宠加成类型正确');

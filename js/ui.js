@@ -97,6 +97,12 @@ export class UI {
     btnA.addEventListener('pointerup', () => this.G.attackHold = false);
     btnA.addEventListener('pointerleave', () => this.G.attackHold = false);
     document.getElementById('btn-interact').onclick = () => this.G.interactPress = true;
+    const iBtn2 = document.getElementById('btn-interact');
+    iBtn2.addEventListener('pointerdown', e => { e.preventDefault(); if (this.G) this.G.interactHold = true; });
+    const iUp = () => { if (this.G) this.G.interactHold = false; };
+    iBtn2.addEventListener('pointerup', iUp);
+    iBtn2.addEventListener('pointercancel', iUp);
+    iBtn2.addEventListener('pointerleave', iUp);
     document.getElementById('btn-fish').onclick = () => this.G.fishingPull();
     // 摇杆
     const joy = document.getElementById('joy'), knob = document.getElementById('joy-knob');
@@ -124,15 +130,15 @@ export class UI {
   tutStep = 0;
   TUT_STEPS = [
     { id: 'move', icon: '👣', n: '学会移动', tip: '用 <b>WASD/方向键</b> 或<b>左侧摇杆</b>四处走走，熟悉一下你的营地', done: G => (G.movedDist || 0) > 6 },
-    { id: 'wood', icon: '🪵', n: '收集木头', tip: '走到一棵<b>树</b>旁边，按 <b>E</b> 或点 <b>✋互动键</b> 采集，收集 <b>8 块木头</b>', done: G => G.count('wood') + (G.stats.gather_wood || 0) >= 8 || (G.buildCounts.campfire || 0) > 0, arrow: 'tree' },
-    { id: 'stone', icon: '🪨', n: '收集石头', tip: '找一块<b>岩石</b>采起来，收集 <b>5 块石头</b>（灰色的大石头）', done: G => G.count('stone') + (G.stats.gather_stone || 0) >= 5 || (G.buildCounts.campfire || 0) > 0, arrow: 'rock' },
-    { id: 'campfire', icon: '🔥', n: '点燃篝火', tip: '点右侧 <b>🔨建造</b> 按钮 → 选<b>篝火</b> → 点击身边空地放置。<br>篝火能照明取暖，是小镇的起点！', done: G => (G.buildCounts.campfire || 0) >= 1, glow: 'build' },
-    { id: 'tool', icon: '🪓', n: '制作工具', tip: '点 <b>⚒️制作</b> → 制作<b>木斧</b>和<b>木镐</b>（各需3木头2纤维，草丛可采纤维）', done: G => (G.stats.craft_axe_wood || 0) >= 1 && (G.stats.craft_pick_wood || 0) >= 1, glow: 'craft' },
-    { id: 'eat', icon: '🍎', n: '吃点东西', tip: '采集<b>浆果丛</b>（紫色果子的灌木）获得浆果，在<b>🎒背包</b>里点击吃掉，别让自己饿着', done: G => (G.stats.eat || 0) >= 1, glow: 'inventory' },
-    { id: 'night', icon: '🌙', n: '度过一夜', tip: '天黑后怪物会出没！手里拿好武器（木棍也行），靠近怪物按 <b>J/空格</b> 攻击。<br>生命危险时按 <b>🏠回城</b> 躲回营地！', done: G => G.day >= 2 || (G.stats.night_kills || 0) >= 1 },
-    { id: 'farm', icon: '🌱', n: '开垦农田', tip: '建造<b>农田</b>后走近它按互动即可播种。收获的作物能做料理、招商人', done: G => (G.buildCounts.plot_farm || 0) >= 1, glow: 'build' },
-    { id: 'recruit', icon: '🧑‍🤝‍🧑', n: '招募居民', tip: '跟着屏幕上的<b>指引箭头</b>去找地图上的幸存者营地，对话后带 TA 回小镇！', done: G => (G.stats.recruit || 0) >= 1, arrow: 'survivor' },
-    { id: 'end', icon: '🏆', n: '交给你了！', tip: '基础都学会了！接下来跟着<b>左上角的主线任务</b>一路发展：<br>围墙防御 → 招贤纳士 → 箭塔守家 → 挑战四大Boss → 传奇小镇！', done: () => false, last: true },
+    { id: 'tool', icon: '🪓', n: '制作工具', tip: '点右侧 <b>⚒️制作</b> → 用初始的木头和纤维，制作<b>木斧</b>和<b>木镐</b>（各需3木2纤维）', done: G => (G.stats.craft_axe_wood || 0) >= 1 && (G.stats.craft_pick_wood || 0) >= 1, glow: 'craft' },
+    { id: 'wood', icon: '🪵', n: '砍树收集木头', tip: '拿好斧头走到<b>树</b>旁，<b>连按 E</b>（或长按 ✋）砍树，收集 <b>8 块木头</b>。跟着屏幕上的橙色箭头走！', done: G => (G.stats.gather_wood || 0) >= 8 || G.count('wood') >= 8 || (G.buildCounts.campfire || 0) > 0, arrow: 'tree' },
+    { id: 'stone', icon: '🪨', n: '挖石头', tip: '用木镐敲<b>灰色岩石</b>，收集 <b>5 块石头</b>（没工具也能徒手挖，只是很慢）', done: G => (G.stats.gather_stone || 0) >= 5 || G.count('stone') >= 5 || (G.buildCounts.campfire || 0) > 0, arrow: 'rock' },
+    { id: 'campfire', icon: '🔥', n: '点燃篝火', tip: '点 <b>🔨建造</b> → 选<b>篝火</b> → 点击身边空地放置。篝火能照明取暖，是小镇的起点！', done: G => (G.buildCounts.campfire || 0) >= 1, glow: 'build' },
+    { id: 'eat', icon: '🍎', n: '吃点东西', tip: '采集<b>浆果丛</b>（紫色果子的灌木），在<b>🎒背包</b>里点击吃掉，别让自己饿着', done: G => (G.stats.eat || 0) >= 1, glow: 'inventory' },
+    { id: 'night', icon: '🌙', n: '度过一夜', tip: '天黑后怪物会出没！装备武器靠近按 <b>J/空格</b> 攻击（开启自动攻击更省心）。<br>危险时按 <b>🏠回城</b> 躲回营地！', done: G => G.day >= 2 || (G.stats.night_kills || 0) >= 1 },
+    { id: 'farm', icon: '🌱', n: '开垦农田', tip: '建造<b>农田</b>后走近它按互动即可播种。收获的作物能做料理、卖商人', done: G => (G.buildCounts.plot_farm || 0) >= 1, glow: 'build' },
+    { id: 'recruit', icon: '🧑‍🤝‍🧑', n: '招募居民', tip: '跟着<b>指引箭头</b>去地图上的幸存者营地，对话后带 TA 回小镇！', done: G => (G.stats.recruit || 0) >= 1, arrow: 'survivor' },
+    { id: 'end', icon: '🏆', n: '交给你了！', tip: '基础都学会了！之后跟着<b>左上角主线任务</b>走：<br>围墙防御 → 招贤纳士 → 箭塔守家 → 挑战四大Boss → 传奇小镇！', done: () => false, last: true },
   ];
   startTutorial() {
     const seen = localStorage.getItem('xh_tut_v2');
