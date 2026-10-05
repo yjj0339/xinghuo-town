@@ -59,6 +59,8 @@ body {
 /* ---------- 左上状态卡 ---------- */
 #stats-card { position: absolute; top: 10px; left: 10px; display: flex; gap: 10px; align-items: center; min-width: 210px; }
 .avatar { width: 52px; height: 52px; border-radius: 16px; background: linear-gradient(145deg, #FFE3B8, #FFC98A); display: flex; align-items: center; justify-content: center; font-size: 28px; border: 2px solid #F2BE78; box-shadow: inset 0 -3px 0 rgba(200,120,30,.25); }
+.pet-ico { position: absolute; left: 52px; top: 34px; font-size: 20px; filter: drop-shadow(0 2px 3px rgba(120,80,20,.4)); animation: petBob 1.6s ease-in-out infinite; }
+@keyframes petBob { 50% { transform: translateY(-3px); } }
 .bars { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .lv-row { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--txt2); align-items: baseline; }
 .lv-row b { color: var(--orange2); font-size: 14px; }

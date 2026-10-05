@@ -1,9 +1,14 @@
 // ============================================================
 // UI：HUD / 全套面板 / 触屏控件 / 商店 / 教程
 // ============================================================
-import { ITEMS, RECIPES, BUILDINGS, MONSTERS, ANIMALS, CROPS, ACHIEVEMENTS, SKILLS, SKILL_CATS, STATIONS, JOBS, MERCHANT, MAIN_QUESTS, SIDE_QUESTS, CONFIG, TOWN_LEVELS } from './data.js';
+import { ITEMS, RECIPES, BUILDINGS, MONSTERS, ANIMALS, CROPS, ACHIEVEMENTS, SKILLS, SKILL_CATS, STATIONS, JOBS, MERCHANT, MAIN_QUESTS, SIDE_QUESTS, CONFIG, TOWN_LEVELS, PETS } from './data.js';
 import { drawItemIcon } from './render.js';
 import { countItem, playerDefense } from './entities.js';
+
+const BADGE_SHOP = [
+  ['book_skill', 8], ['bar_gold', 3], ['crystal', 4], ['potion_big', 3],
+  ['ring_luck', 12], ['amulet_warm', 10], ['boots_spring', 11], ['map_treasure', 5],
+];
 
 const PHASE_CN = { dawn: '清晨', day: '白天', dusk: '黄昏', night: '夜晚' };
 const WEATHER_CN = { sunny: '☀️ 晴', cloud: '⛅ 多云', rain: '🌧️ 雨', storm: '⛈️ 雷暴', fog: '🌫️ 雾', heat: '🔥 热浪', snow: '🌨️ 雪', blizzard: '❄️ 暴雪' };
@@ -40,6 +45,7 @@ export class UI {
     document.getElementById('hud').innerHTML = `
       <div id="stats-card" class="card">
         <div class="avatar">🧑‍🌾</div>
+        <div id="hud-pet" class="pet-ico" style="display:none">🐣</div>
         <div class="bars">
           <div class="lv-row"><b id="hud-lv">Lv.1</b><span id="hud-xp"></span></div>
           <div class="bar hp"><i id="bar-hp"></i><span id="txt-hp"></span></div>
@@ -139,7 +145,7 @@ export class UI {
     localStorage.setItem('xh_tut_v2', '1');
     const el = document.getElementById('tutorial');
     if (el) el.style.display = 'none';
-    this.G && (this.G.guideArrow = null);
+    if (this.G) { this.G.guideArrow = null; this.G._arrowByTut = false; }
     this.clearGlow();
     this.toast('📋 跟着左上角主线任务走即可，加油！');
   }
@@ -173,7 +179,7 @@ export class UI {
   dismissTutCard() {
     const el = document.getElementById('tutorial');
     el.style.display = 'none';
-    // 非最后步：等条件达成自动前进（卡片隐藏期间也检测）
+    if (this.TUT_STEPS[this.tutStep]?.last) this.skipTutorial(); // 最后一步点按钮即结业
   }
   updateTutorial(dt) {
     if (!this.tutorial) return;
@@ -187,7 +193,8 @@ export class UI {
       this.renderTutCard();
       return;
     }
-    // 指引箭头
+    // 指引箭头（教程箭头优先于主线箭头）
+    G._arrowByTut = true;
     G.guideArrow = null;
     if (step.arrow === 'tree' || step.arrow === 'rock') {
       const t = this.findNearestObj(step.arrow === 'tree' ? ['tree', 'tree_pine', 'tree_big', 'apple_tree'] : ['rock', 'rock_sand', 'ore_copper', 'ore_coal']);
@@ -239,6 +246,12 @@ export class UI {
     $('bar-energy').style.width = p.energy + '%';
     $('hud-temp').textContent = (p.temp < 5 ? '🥶' : p.temp > 38 ? '🥵' : '🌡️') + p.temp + '°';
     $('hud-skillpts').innerHTML = p.skillPts > 0 ? `<b class="sp">✦${p.skillPts}技能点</b>` : '';
+    // 宠物跟宠显示
+    const petEl = document.getElementById('hud-pet');
+    if (petEl) {
+      if (G.pet) { const pd = PETS[G.pet.type]; petEl.style.display = ''; petEl.title = `${pd.n}：${pd.d}`; }
+      else petEl.style.display = 'none';
+    }
     $('hud-coins').textContent = `🪙 ${p.coins}`;
     $('hud-town').textContent = `🏛️ ${G.town.lv}级·${G.settlerCount()}人`;
     const hour = Math.floor(((G.dayTime + .25) % 1) * 24), min = Math.floor((((G.dayTime + .25) % 1) * 24 % 1) * 60);
@@ -375,6 +388,13 @@ export class UI {
           case 'sellall': G.sellItem(a1, G.count(a1)); break;
           case 'buy': G.buyItem(a1, 1); break;
           case 'buy5': G.buyItem(a1, 5); break;
+          case 'badgebuy': {
+            const cost = +a2 || 0;
+            if (G.count('essence_badge') >= cost && G.take('essence_badge', cost)) {
+              G.give(a1, 1); G.sfx('chest'); G.toast(`🎖️ 兑换成功：${ITEMS[a1].n}`);
+            } else G.toast('徽章不足');
+            break;
+          }
           case 'take': { const s = G.town.storage[+a1]; if (s && G.give(s.id, s.n)) G.town.storage[+a1] = null; break; }
           case 'takeall': { for (let i = 0; i < G.town.storage.length; i++) { const s = G.town.storage[i]; if (s && G.give(s.id, s.n)) G.town.storage[i] = null; } break; }
           case 'store': { const s = G.player.inv[+a1]; if (s && G.addStorage(s.id, s.n)) G.take(s.id, s.n); break; }
@@ -385,6 +405,11 @@ export class UI {
           case 'import': { const t = prompt('粘贴存档数据：'); if (t) { try { JSON.parse(t); localStorage.setItem(CONFIG.SAVE_KEY, t); location.reload(); } catch (e) { alert('存档数据无效'); } } break; }
           case 'save': G.save(); break;
           case 'sfx': G.settings.sfx = !G.settings.sfx; break;
+          case 'bgm': {
+            if (window.__bgmToggle) window.__bgmToggle();
+            break;
+          }
+          case 'petfree': G.releasePet(); break;
           case 'autoatk': G.settings.autoAtk = !G.settings.autoAtk; G.toast(G.settings.autoAtk ? '⚔️ 自动攻击已开启（怪物靠近自动挥击）' : '自动攻击已关闭'); break;
           case 'dmgnum': G.settings.dmgNum = !G.settings.dmgNum; break;
           case 'tut': localStorage.removeItem('xh_tut_v2'); this.closePanel(); this.tutorial = true; this.tutStep = 0; this.renderTutCard(); break;
@@ -599,12 +624,14 @@ export class UI {
     const G = this.G;
     return `
       <div class="set-row">
+        <button class="craft-btn" data-act="bgm">🎵 音乐：${window.__bgmOn !== false ? '开' : '关'}</button>
         <button class="craft-btn" data-act="sfx">🔔 音效：${G.settings.sfx ? '开' : '关'}</button>
         <button class="craft-btn" data-act="autoatk">⚔️ 自动攻击：${G.settings.autoAtk ? '开' : '关'}</button>
       </div>
       <div class="set-row">
         <button class="craft-btn" data-act="dmgnum">💥 伤害数字：${G.settings.dmgNum ? '开' : '关'}</button>
         <button class="craft-btn" data-act="save">💾 立即保存</button>
+        ${G.pet ? '<button class="craft-btn danger" data-act="petfree">🕊️ 放生跟宠</button>' : ''}
       </div>
       <div class="set-row">
         <button class="craft-btn" data-act="export">📤 导出存档</button>
@@ -623,7 +650,16 @@ export class UI {
   }
   htmlTrade() {
     const G = this.G;
-    if (!G.town.merchant) return `<div class="hint">商队不在镇上（每3天来访一次，日落离开）</div>`;
+    let badgeHtml = '';
+    if (G.town.merchant) {
+      badgeHtml = `<div class="sec-title">🎖️ Boss徽章兑换（持有 ${G.count('essence_badge')}）</div>`;
+      for (const [id, cost] of BADGE_SHOP) {
+        badgeHtml += `<div class="recipe-row"><div class="r-ico"><img src="${this.iconURL(id)}"></div>
+          <div class="r-main"><b>${ITEMS[id].n}</b><div class="mats"><span class="${G.count('essence_badge') >= cost ? 'ok' : 'lack'}">🎖️×${cost}</span></div></div>
+          <button class="craft-btn ${G.count('essence_badge') >= cost ? '' : 'dis'}" data-act="badgebuy" data-a1="${id}" data-a2="${cost}">兑换</button></div>`;
+      }
+    }
+    if (!G.town.merchant) return `<div class="hint">商队不在镇上（每3天来访一次，日落离开）</div>` + badgeHtml;
     let buy = '';
     for (const [id, price] of MERCHANT.sell) {
       buy += `<div class="recipe-row"><div class="r-ico"><img src="${this.iconURL(id)}"></div>

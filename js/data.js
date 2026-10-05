@@ -154,6 +154,8 @@ export const ITEMS = {
   seed_carrot: { n: '胡萝卜种子',c:'seed', p: 4, seed: { crop: 'carrot' }, d: '春夏可种，2天成熟' },
   seed_pumpkin:{ n: '南瓜种子', c: 'seed', p: 6, seed: { crop: 'pumpkin' }, d: '夏秋可种，3天成熟' },
   seed_chili:  { n: '火焰椒种子',c:'seed', p: 6, seed: { crop: 'chili' },  d: '夏季可种，2天成熟' },
+  seed_strawberry: { n: '草莓种子', c: 'seed', p: 5, seed: { crop: 'strawberry' }, d: '春夏可种，2天成熟' },
+  seed_corn:   { n: '玉米种子', c: 'seed', p: 5, seed: { crop: 'corn' }, d: '夏秋可种，3天成熟' },
   // —— 特殊
   key_ruin:    { n: '废墟钥匙', c: 'special', p: 15, d: '能打开废墟里的封印宝箱' },
   book_skill:  { n: '技能书',   c: 'special', p: 60, d: '研读后获得1点技能点' },
@@ -162,6 +164,13 @@ export const ITEMS = {
   trophy_ice:    { n: '冰雪女巫冠冕',   c: 'special', p: 150, d: '凝结着极寒的魔力' },
   trophy_flame:  { n: '炎魔核心',       c: 'special', p: 200, d: '仍在燃烧的火焰心脏' },
   trophy_ancient:{ n: '远古之心',       c: 'special', p: 500, d: '山谷万物的源初之力' },
+  essence_badge: { n: 'Boss徽章',       c: 'special', p: 60, d: '击败Boss获得的荣誉徽章，可在商队兑换珍品' },
+  pet_egg_dragon:{ n: '龙蛋',           c: 'special', p: 300, d: '温热的龙蛋，使用后孵化一只小龙宠物（击败炎魔领主掉落）' },
+  strawberry:    { n: '草莓',   c: 'food', p: 5, food: { h: 6, t: 5, e: 4 }, d: '香甜的红草莓' },
+  corn:          { n: '玉米',   c: 'food', p: 4, food: { h: 6, e: 5 }, d: '金黄饱满的玉米' },
+  fish_cooked:   { n: '烤鱼',   c: 'food', p: 10, food: { h: 14, e: 8, hp: 3 }, d: '外焦里嫩' },
+  fruit_salad:   { n: '水果沙拉', c: 'food', p: 14, food: { h: 10, t: 10, e: 10 }, d: '清爽果香' },
+  feast:         { n: '拓荒者盛宴', c: 'food', p: 30, food: { h: 35, t: 10, e: 20, hp: 15 }, d: '小镇最隆重的美味' },
   // —— 鱼
   fish_crucian:{ n: '鲫鱼',   c: 'fish', p: 5,  fish: { w: [0.3, 1.2], rarity: 1 } },
   fish_carp:   { n: '鲤鱼',   c: 'fish', p: 9,  fish: { w: [0.8, 2.5], rarity: 1 } },
@@ -234,6 +243,9 @@ export const RECIPES = [
   { id: 'r_stew',       st: 'pot', in: [['meat_raw', 1], ['carrot', 1], ['mushroom', 1]], out: ['stew', 1] },
   { id: 'r_honey_cookie',st:'pot', in: [['honey', 1], ['flour', 1]], out: ['honey_cookie', 2] },
   { id: 'r_fish_soup',  st: 'pot', in: [['fish_crucian', 1], ['carrot', 1]], out: ['fish_soup', 1] },
+  { id: 'r_fish_cooked',st: 'pot', in: [['fish_carp', 1]], out: ['fish_cooked', 1] },
+  { id: 'r_fruit_salad',st: 'pot', in: [['apple', 1], ['strawberry', 2], ['berry', 2]], out: ['fruit_salad', 1] },
+  { id: 'r_feast',      st: 'pot', in: [['meat_cooked', 2], ['bread', 1], ['fruit_salad', 1]], out: ['feast', 1], unlock: 'town3' },
   { id: 'r_fried_egg',  st: 'pot', in: [['egg', 1]], out: ['fried_egg', 1] },
   { id: 'r_cheese',     st: 'pot', in: [['milk', 2]], out: ['cheese', 1] },
   { id: 'r_juice',      st: 'pot', in: [['berry', 3]], out: ['juice', 1] },
@@ -310,6 +322,15 @@ export const CROPS = {
   carrot:  { n: '胡萝卜', seasons: [0, 1], days: 2, out: [['carrot', 2], ['seed_carrot', 1]], bonus: [['carrot', 1, .4]] },
   pumpkin: { n: '南瓜',   seasons: [1, 2], days: 3, out: [['pumpkin', 1], ['seed_pumpkin', 1]], bonus: [['pumpkin', 1, .35]] },
   chili:   { n: '火焰椒', seasons: [1],    days: 2, out: [['chili', 2], ['seed_chili', 1]], bonus: [['chili', 1, .5]] },
+  strawberry: { n: '草莓', seasons: [0, 1], days: 2, out: [['strawberry', 2], ['seed_strawberry', 1]], bonus: [['strawberry', 1, .5]] },
+  corn:    { n: '玉米',   seasons: [1, 2], days: 3, out: [['corn', 2], ['seed_corn', 1]], bonus: [['corn', 1, .4]] },
+};
+
+// ---------------- 宠物 ----------------
+export const PETS = {
+  chick:   { n: '小鸡跟宠', spr: 'chicken', buff: 'gather', d: '采集速度+10%', mul: .1 },
+  bunny:   { n: '兔子跟宠', spr: 'rabbit_mob', buff: 'speed', d: '移动速度+8%', mul: .08 },
+  dragon:  { n: '幼龙跟宠', spr: 'dragon_whelp', buff: 'power', d: '攻击力+12%', mul: .12 },
 };
 
 // ---------------- 怪物 ----------------
@@ -500,6 +521,12 @@ export const ACHIEVEMENTS = [
   { id: 'a_ruins',       n: '考古学家',   desc: '探访全部废墟',           cond: { t: 'stat', k: 'ruins', n: 4 } },
   { id: 'a_fish_all',    n: '图鉴·渔夫',  desc: '集齐 7 种鱼',            cond: { t: 'stat', k: 'fish_kinds', n: 7 } },
   { id: 'a_tower_5',     n: '铜墙铁壁',   desc: '建造 5 座防御塔',        cond: { t: 'stat', k: 'towers', n: 5 } },
+  { id: 'a_pet',         n: '铲屎官',     desc: '获得一只跟宠',           cond: { t: 'stat', k: 'pet', n: 1 } },
+  { id: 'a_pet_dragon',  n: '驯龙高手',   desc: '孵化龙蛋获得幼龙跟宠',   cond: { t: 'stat', k: 'pet_dragon', n: 1 } },
+  { id: 'a_badge_10',    n: '徽章收藏家', desc: '累计获得 10 枚Boss徽章', cond: { t: 'stat', k: 'badges', n: 10 } },
+  { id: 'a_mon_20',      n: '怪物学者',   desc: '图鉴遭遇 20 种怪物',     cond: { t: 'stat', k: 'mon_seen', n: 20 } },
+  { id: 'a_cook_all',    n: '美食家',     desc: '烹饪 10 种不同料理',     cond: { t: 'stat', k: 'cook_kinds', n: 10 } },
+  { id: 'a_offline',     n: '挂机也是玩', desc: '领取一次离线收益',       cond: { t: 'stat', k: 'offline_claim', n: 1 } },
 ];
 
 // ---------------- 技能树（4系12技能） ----------------

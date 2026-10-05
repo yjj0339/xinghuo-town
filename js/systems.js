@@ -4,7 +4,7 @@
 import {
   CONFIG, ITEMS, RECIPES, BUILDINGS, CROPS, MONSTERS, ANIMALS, WORLD_OBJECTS,
   MAIN_QUESTS, SIDE_QUESTS, DAILY_POOL, ACHIEVEMENTS, SKILLS, TOWN_LEVELS,
-  MERCHANT, FISH_TABLE, BIOMES, NAMES, JOBS, RANDOM_EVENTS,
+  MERCHANT, FISH_TABLE, BIOMES, NAMES, JOBS, RANDOM_EVENTS, PETS,
 } from './data.js';
 import { makeQueries } from './world.js';
 import { genWorld, mulberry32 } from './world.js';
@@ -112,6 +112,7 @@ export class Game {
     let final = dmg;
     if (from === 'player') {
       final = dmg * (0.9 + this.rng() * .2);
+      final *= 1 + this.petBuff('power');
       const acc = this.player.equip.acc && ITEMS[this.player.equip.acc];
       if (acc?.arm?.luck && this.rng() < acc.arm.luck) { /* 幸运：额外掉落在死亡时多roll一次 */ target.lucky = true; }
     }
@@ -191,7 +192,13 @@ export class Game {
     }
     if (def.boss) {
       this.toast(`🏆 击败了 ${def.n}！`); this.sfx('roar');
-      this.floaters.push({ x: m.x, z: m.z, y: -60, text: `${def.n} 被击败！`, color: '#ffd84c', life: 2, big: true });
+      // Boss徽章（可重复获取，用于兑换）
+      const badges = 2 + Math.floor(this.rng() * 2);
+      this.give('essence_badge', badges);
+      this.stats.badges = (this.stats.badges || 0) + badges;
+      // 炎魔领主首次必掉龙蛋
+      if (m.type === 'flame_lord' && (this.stats['boss_flame_lord'] || 0) <= 1) this.give('pet_egg_dragon', 1);
+      this.floaters.push({ x: m.x, z: m.z, y: -60, text: `${def.n} 被击败！+${badges}徽章`, color: '#ffd84c', life: 2, big: true });
     }
     for (let i = 0; i < (def.boss ? 14 : 4); i++) this.particles.push({ x: m.x, z: m.z, y: -14, t: 0, kind: 'poof', vx: (this.rng() - .5) * 3, vz: (this.rng() - .5) * 3 });
   }
@@ -386,6 +393,59 @@ export class Game {
     return true;
   }
 
+  // ---------- 宠物 ----------
+  pet = null; // {type}
+  adoptPet(type, silent) {
+    if (!PETS[type]) return false;
+    this.pet = { type, x: this.player.x, z: this.player.z, seed: this.rng(), dir: 2, moving: false, r: .3, spd: 4.6, kind: 'pet', id: -1, hitT: 0, atkT: 0 };
+    this.stats.pet = 1;
+    if (type === 'dragon') this.stats.pet_dragon = 1;
+    if (!silent) {
+      this.toast(`🐣 ${PETS[type].n}加入了你！${PETS[type].d}`);
+      this.sfx('join'); this.bus('pet');
+    }
+    return true;
+  }
+  petBuff(kind) {
+    if (!this.pet) return 0;
+    const p = PETS[this.pet.type];
+    return p && p.buff === kind ? p.mul : 0;
+  }
+  releasePet() { this.pet = null; this.toast('宠物回到大自然去了'); }
+
+  // ---------- 离线收益 ----------
+  calcOffline() {
+    const raw = localStorage.getItem(CONFIG.SAVE_KEY);
+    if (!raw) return null;
+    try {
+      const d = JSON.parse(raw);
+      if (!d.wallTime) return null;
+      const mins = Math.min(24 * 60, (Date.now() - d.wallTime) / 60000);
+      if (mins < 30) return null;
+      const settlers = (d.npcs || []).filter(n => !n.escorting).length;
+      if (settlers <= 0) return null;
+      const packs = [];
+      const pool = ['wood', 'stone', 'fiber', 'berry', 'ore_copper', 'wheat'];
+      const total = Math.floor(settlers * mins / 45);
+      for (let i = 0; i < total; i++) {
+        const it = pool[Math.floor(this.rng() * pool.length)];
+        const ex = packs.find(p => p[0] === it);
+        if (ex) ex[1]++; else packs.push([it, 1]);
+      }
+      return { mins: Math.round(mins), settlers, packs };
+    } catch (e) { return null; }
+  }
+  claimOffline() {
+    const r = this.calcOffline();
+    if (!r) return null;
+    const got = [];
+    for (const [it, n] of r.packs) {
+      if (this.addStorage(it, n)) got.push(`${ITEMS[it].n}×${n}`);
+    }
+    this.stats.offline_claim = 1;
+    return { mins: r.mins, settlers: r.settlers, got };
+  }
+
   // ---------- 回城 ----------
   homeCd = 0;
   homeTp() {
@@ -514,6 +574,7 @@ export class Game {
         s.kills = (s.kills || 0) + 1;
         if (this.phase === 'night' || this.phase === 'dusk') s.night_kills = (s.night_kills || 0) + 1;
         if (MONSTERS[a]?.boss) s['boss_' + a] = (s['boss_' + a] || 0) + 1;
+        s.mon_seen = Object.keys(this.codex.monsters).length;
         break;
       }
       case 'kill_animal': break;
@@ -522,7 +583,7 @@ export class Game {
       case 'eat': s.eat = (s.eat || 0) + 1; break;
       case 'plant': s.plant = (s.plant || 0) + 1; break;
       case 'harvest': s.harvest = (s.harvest || 0) + 1; break;
-      case 'cook': s.cook = (s.cook || 0) + 1; this.codex.items[a] = true; break;
+      case 'cook': s.cook = (s.cook || 0) + 1; this.codex.items[a] = true; this._cookedKinds = this._cookedKinds || new Set(); this._cookedKinds.add(a); s.cook_kinds = this._cookedKinds.size; break;
       case 'fish': {
         s.fish = (s.fish || 0) + 1;
         if (a === 'fish_koi') s.koi = (s.koi || 0) + 1;
@@ -542,12 +603,66 @@ export class Game {
     this.checkQuests();
   }
   checkQuests() {
-    // 主线完成提示（不自动领取，由玩家在任务面板领取 → 保持仪式感；主线完成时弹提示）
+    // 主线完成提示
     const mq = this.mainQuest();
     if (mq && this.questReady(mq) && !mq._readyShown) {
       mq._readyShown = true;
       this.toast(`✅ 主线「${mq.n}」目标达成！打开任务面板领取奖励`);
       this.sfx('quest');
+    }
+    // 主线指引箭头（教程箭头优先，见 ui.updateTutorial）
+    if (!this._arrowByTut) {
+      this.guideArrow = this.mainQuestArrow();
+    }
+  }
+  mainQuestArrow() {
+    const p = this.player;
+    const near = (ids) => {
+      let best = null, bd = 40;
+      const tx = Math.floor(p.x), tz = Math.floor(p.z);
+      for (let dz = -30; dz <= 30; dz++) for (let dx = -30; dx <= 30; dx++) {
+        const x = tx + dx, z = tz + dz;
+        if (!this.q.inBounds(x, z)) continue;
+        const o = this.world.obj[z * this.world.W + x];
+        if (o && ids.includes(o.id)) {
+          const d = Math.hypot(x + .5 - p.x, z + .5 - p.z);
+          if (d < bd) { bd = d; best = { x: x + .5, z: z + .5 }; }
+        }
+      }
+      return best;
+    };
+    const mq = this.mainQuest();
+    if (!mq) return null;
+    switch (mq.id) {
+      case 'm1': {
+        if (this.count('wood') + (this.stats.gather_wood || 0) < 8) { const t = near(['tree', 'tree_pine', 'tree_big', 'apple_tree']); if (t) return { ...t, label: '采集木头 🪓' }; }
+        const t2 = near(['rock', 'rock_sand']); if (t2) return { ...t2, label: '采集石头 ⛏️' };
+        return null;
+      }
+      case 'm2': return null;
+      case 'm8': {
+        const s = this.pois.find(x => x.type === 'survivor' && !x.rescued);
+        return s ? { x: s.x + .5, z: s.z + .5, label: '幸存者 🧑' } : null;
+      }
+      case 'm11': case 'm13': case 'm14': {
+        const map = { m11: 'goblin_king', m13: 'ice_queen', m14: null };
+        if (mq.id === 'm13' && !this.stats.boss_ice_queen) {
+          const a = this.pois.find(x => x.type === 'altar' && x.id === 'ice_queen');
+          if (a) return { x: a.x + .5, z: a.z + .5, label: '冰雪祭坛 ❄️' };
+        }
+        if (mq.id === 'm13' && this.stats.boss_ice_queen && !this.stats.boss_flame_lord) {
+          const a = this.pois.find(x => x.type === 'altar' && x.id === 'flame_lord');
+          if (a) return { x: a.x + .5, z: a.z + .5, label: '火焰祭坛 🔥' };
+        }
+        const bid = { m11: 'goblin_king', m14: 'treant_ancient' }[mq.id];
+        if (bid && !this.stats['boss_' + bid]) {
+          const a = this.pois.find(x => x.type === 'altar' && x.id === bid) || (mq.id === 'm14' ? null : null);
+          if (a) return { x: a.x + .5, z: a.z + .5, label: MONSTERS[bid].n + ' 👹' };
+          if (mq.id === 'm14' && !this.buildCounts.altar_ancient) return { x: this.townCenter.x, z: this.townCenter.z, label: '在家建造远古祭坛 🔮' };
+        }
+        return null;
+      }
+      default: return null;
     }
   }
   claimMain() {
@@ -833,6 +948,20 @@ export class Game {
     if (p.fx.slow) p.spdMul *= .5;
     const boots = p.equip.feet && ITEMS[p.equip.feet]?.arm?.spd; if (boots) p.spdMul *= 1 + boots;
     if (this.phase === 'night' && p.skills.night_owl) p.spdMul *= 1 + p.skills.night_owl * .1;
+    p.spdMul *= 1 + this.petBuff('speed');
+    // 宠物跟随
+    if (this.pet) {
+      const pt = this.pet;
+      const d = Math.hypot(pt.x - p.x, pt.z - p.z);
+      if (d > 2.2) {
+        const nx = (p.x - pt.x) / d, nz = (p.z - pt.z) / d;
+        const n2 = this.isBlockedFor(pt, pt.x + nx * 4 * dt) ? pt.x : pt.x + nx * 4.6 * dt;
+        const n3 = this.isBlockedFor(pt, pt.x, pt.z + nz * 4 * dt) ? pt.z : pt.z + nz * 4.6 * dt;
+        pt.x = n2; pt.z = n3; pt.moving = true;
+        pt.dir = Math.abs(nx) > Math.abs(nz) * 2 ? (nx > 0 ? 2 : 1) : 0;
+      } else pt.moving = false;
+      if (d > 14) { pt.x = p.x - 1; pt.z = p.z; } // 走丢瞬移
+    }
     // 状态消耗
     const metaMul = 1 - (p.skills.metabolism || 0) * .1;
     const hot = this.weather === 'heat';
@@ -981,10 +1110,12 @@ export class Game {
   summonBoss(bossId) {
     const poi = this.pois.find(x => x.type === 'altar' && x.id === bossId);
     if (!poi) return false;
-    if (this.entities.some(e => e.boss)) { this.toast('已有 Boss 在场！'); return false; }
-    const m = makeMonster(bossId, poi.x + .5, poi.z + .5, {});
+    if (this.entities.some(e => e.boss && !e.dead)) { this.toast('已有 Boss 在场！'); return false; }
+    const kills = this.stats['boss_' + bossId] || 0;
+    const m = makeMonster(bossId, poi.x + .5, poi.z + .5, { hpMul: 1 + kills * .35 });
     this.entities.push(m);
-    this.toast(`👹 ${MONSTERS[bossId].n} 苏醒了！`); this.sfx('roar');
+    this.toast(`👹 ${MONSTERS[bossId].n} 苏醒了！${kills > 0 ? `（第${kills + 1}次挑战，更强，掉落徽章）` : ''}`);
+    this.sfx('roar');
     return true;
   }
 
@@ -1067,7 +1198,7 @@ export class Game {
         const tool = bestTool(p.inv, kind);
         if (!tool || ITEMS[tool].tool.tier < tier) { this.toast(`需要${{ axe: '斧', pick: '镐', shovel: '铲' }[kind]}（T${tier}）`); return false; }
       }
-      const dmg = 1 + (p.skills.sharp_tools || 0) * .2;
+      const dmg = (1 + (p.skills.sharp_tools || 0) * .2) * (1 + this.petBuff('gather'));
       t.obj.hp -= dmg; t.obj.hitT = .2;
       this.sfx(kind === 'axe' ? 'chop' : kind === 'pick' ? 'mine' : 'dig');
       this.particles.push({ x: t.x, z: t.z, y: -18, t: 0, kind: kind === 'axe' ? 'leaf' : 'spark', vx: (this.rng() - .5) * 2, vz: (this.rng() - .5) * 2 });
@@ -1146,7 +1277,18 @@ export class Game {
     }
     if (t.kind === 'merchant') { this.openPanel?.('trade'); return true; }
     if (t.kind === 'animal') {
-      if (this.take('feed', 1)) { t.e.follow = true; this.toast(`${ANIMALS[t.e.type].n}被吸引了，把它带回对应的棚舍吧`); return true; }
+      if (t.e.follow) {
+        // 已引诱：鸡/兔可收养为跟宠，牛/羊送棚舍
+        if (['chicken', 'rabbit_mob'].includes(t.e.type)) {
+          if (this.pet) { this.toast('你已经有跟宠了（可在设置中放生后再收养）'); return false; }
+          t.e.dead = true;
+          this.adoptPet(t.e.type === 'chicken' ? 'chick' : 'bunny');
+          return true;
+        }
+        if (this.tryHouse(t.e)) { t.e.dead = true; }
+        return true;
+      }
+      if (this.take('feed', 1)) { t.e.follow = true; this.toast(`${ANIMALS[t.e.type] ? ANIMALS[t.e.type].n : '小动物'}被吸引了：鸡/兔可收养为跟宠，牛/羊带回棚舍`); return true; }
       this.toast('需要饲料（小麦制作）');
       return false;
     }
@@ -1198,6 +1340,7 @@ export class Game {
       return true;
     }
     if (slot.id === 'book_skill') { this.take('book_skill', 1); p.skillPts++; this.toast('📖 研读技能书，+1 技能点'); this.sfx('level'); return true; }
+    if (slot.id === 'pet_egg_dragon') { this.take('pet_egg_dragon', 1); this.adoptPet('dragon'); return true; }
     if (slot.id === 'map_treasure') {
       this.take('map_treasure', 1);
       for (let k = 0; k < 80; k++) {
@@ -1275,6 +1418,7 @@ export class Game {
         town: { lv: this.town.lv, storage: this.town.storage, merchantDay: this.town.merchantDay, raidTonight: this.town.raidTonight },
         stats: this.stats, claimedSides: this.claimedSides, mainIdx: this.mainIdx, dailies: this.dailies,
         codex: this.codex, settings: this.settings, unlockedAch: this.unlockedAch ? [...this.unlockedAch] : [],
+        pet: this.pet ? this.pet.type : null, wallTime: Date.now(), cookedKinds: this._cookedKinds ? [...this._cookedKinds] : [],
       };
       localStorage.setItem(CONFIG.SAVE_KEY, JSON.stringify(data));
       if (!silent) this.toast('💾 已保存');
@@ -1313,6 +1457,8 @@ export class Game {
     this.stats = d.stats || {}; this.claimedSides = d.claimedSides || []; this.mainIdx = d.mainIdx || 0; this.dailies = d.dailies || [];
     this.codex = d.codex || this.codex; this.settings = d.settings || this.settings;
     this.unlockedAch = new Set(d.unlockedAch || []);
+    if (d.pet) this.adoptPet(d.pet, true);
+    this._cookedKinds = new Set(d.cookedKinds || []);
     this.toast('📂 读取存档成功');
   }
   placeBuildingRaw(b) {

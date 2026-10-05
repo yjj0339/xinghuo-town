@@ -248,6 +248,21 @@ export function updateAnimal(G, e, dt) {
 export function updateNPC(G, e, dt) {
   e.atkCd = Math.max(0, e.atkCd - dt); e.atkT = Math.max(0, e.atkT - dt); e.hitT = Math.max(0, e.hitT - dt);
   e.talkT = Math.max(0, e.talkT - dt);
+  // 随机闲聊气泡
+  if (e.say) { e.say.t -= dt; if (e.say.t <= 0) e.say = null; }
+  else if (Math.random() < dt * .05) {
+    const lines = {
+      lumberjack: ['这些木头真不错', '今天也要努力伐木！', '森林里空气真好~'],
+      miner: ['叮叮当当~', '我闻到矿脉的味道了', '石头石头好石头'],
+      farmer: ['庄稼长得不错', '要下雨就好了', '新鲜的蔬菜最棒了'],
+      cook: ['咕嘟咕嘟炖着呢', '谁饿了？马上开饭！', '今天的汤特别香'],
+      guard: ['一切安全！', '有我在，别怕', '夜里要格外小心'],
+      medic: ['身体是拓荒的本钱', '受伤了来找我', '多喝热水'],
+      none: ['小镇真舒服呀', '今天天气真好', '要是有一块蛋糕就好了', '听说北边雪山很危险'],
+    };
+    const pool = lines[e.job] || lines.none;
+    e.say = { text: pool[Math.floor(Math.random() * pool.length)], t: 3 };
+  }
   const tc = G.townCenter, R = CONFIG.TOWN_RADIUS;
   const eff = (1 + (G.player.skills.mayor || 0) * .1) * (e.happiness / 70);
   e.workT -= dt;

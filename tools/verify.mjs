@@ -182,6 +182,45 @@ ok(G2.mainIdx === G.mainIdx, '存档主线进度一致');
 G2.give('wood', 10); G2.craft(RECIPES.find(r => r.out[0] === 'rope'));
 for (let i = 0; i < 500; i++) G2.update(.1);
 
+// ---------------- 3.5 v3 新系统 ----------------
+section('v3：宠物/离线收益/徽章/新内容');
+ok(G.adoptPet('chick') === true, '收养小鸡跟宠');
+ok(G.petBuff('gather') > 0, '跟宠采集加成生效');
+ok(G.petBuff('power') === 0, '跟宠加成类型正确');
+G.releasePet();
+ok(G.adoptPet('dragon', true) === true, '龙蛋孵化幼龙跟宠');
+ok(G.petBuff('power') > 0, '幼龙攻击加成生效');
+// 徽章：击Boss 掉徽章
+G.stats.boss_goblin_king = 0;
+const king2 = G.entities.find(e => e.boss && e.type === 'goblin_king') || (() => { const k = makeMonster('goblin_king', 5, 5, {}); G.entities.push(k); return k; })();
+const badgeBefore = G.count('essence_badge') + 0;
+G.killMonster(king2, 'player');
+ok(G.count('essence_badge') > badgeBefore, `Boss徽章掉落（+${G.count('essence_badge') - badgeBefore}）`);
+ok(G.summonBoss('goblin_king') === true, 'Boss可重复召唤');
+const king3 = G.entities.find(e => e.boss && !e.dead);
+ok(king3 && king3.maxHp > MONSTERS.goblin_king.hp, `重复召唤变强（${Math.round(king3.maxHp)}>${MONSTERS.goblin_king.hp}）`);
+G.killMonster(king3, 'player');
+// 离线收益
+localStorage.setItem(CONFIG.SAVE_KEY, JSON.stringify({ ...JSON.parse(localStorage.getItem(CONFIG.SAVE_KEY)), wallTime: Date.now() - 3 * 3600 * 1000, npcs: G.entities.filter(e => e.kind === 'npc').map(n => ({ name: n.name, job: n.job, x: n.x, z: n.z, happiness: 70 })) }));
+G.day = 1;
+const off = G.claimOffline();
+ok(off && off.mins >= 170, `离线收益结算（${off ? off.mins + '分钟' : 'null'}）`);
+ok(off && off.got.length > 0, `离线产物入仓（${off ? off.got.join(',') : '-'}）`);
+// 新配方/作物
+ok(!!ITEMS.fish_cooked && !!ITEMS.fruit_salad && !!ITEMS.feast, '新料理物品存在');
+ok(RECIPES.some(r => r.out[0] === 'feast') && RECIPES.some(r => r.out[0] === 'fruit_salad'), '新料理配方存在');
+ok(CROPS.strawberry && CROPS.corn, '新作物存在');
+ok(ITEMS.seed_strawberry && ITEMS.seed_corn, '新作物种子存在');
+// 宠物存档回路
+G.save(true);
+const d3 = JSON.parse(localStorage.getItem(CONFIG.SAVE_KEY));
+ok(d3.pet === 'dragon', '宠物写入存档');
+const G3 = new Game(d3.seed); G3.applySave(d3);
+ok(G3.pet && G3.pet.type === 'dragon', '宠物读档恢复');
+// 主线指引箭头
+G.mainIdx = 7; G._arrowByTut = false; G.checkQuests();
+ok(!!G.guideArrow, `主线箭头（m8指向幸存者：${G.guideArrow ? G.guideArrow.label : 'null'}）`);
+
 // ---------------- 4. 汇总 ----------------
 console.log(`\n========================\n✅ 通过 ${pass} 项 · ❌ 失败 ${fail} 项\n========================`);
 process.exit(fail ? 1 : 0);

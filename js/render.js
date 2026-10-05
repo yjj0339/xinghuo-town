@@ -1,8 +1,10 @@
 // ============================================================
 // 等距渲染器 v2：AI高清sprite + 预渲染地形缓存 + 光照天气
 // ============================================================
-import { CONFIG, BIOMES, WORLD_OBJECTS, BUILDINGS, ITEMS, MONSTERS, ANIMALS } from './data.js';
+import { CONFIG, BIOMES, WORLD_OBJECTS, BUILDINGS, ITEMS, MONSTERS, ANIMALS, PETS } from './data.js';
 import { drawSpr, hasSpr } from './assets.js';
+
+const G_PETS = PETS;
 
 const TW = CONFIG.TILE_W, TH = CONFIG.TILE_H;
 
@@ -319,6 +321,19 @@ export function drawNPC(ctx, e, time) {
       ctx.fillText(badge, 20, -hOf(id) * .55);
     }
     if (e.hp < e.maxHp) { ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(-12, -hOf(id) - 8, 24, 3.4); ctx.fillStyle = '#6cbf4a'; ctx.fillRect(-12, -hOf(id) - 8, 24 * e.hp / e.maxHp, 3.4); }
+    // 闲聊气泡
+    if (e.say) {
+      ctx.font = '11px "Microsoft YaHei",sans-serif';
+      const txt = e.say.text;
+      const w = ctx.measureText(txt).width + 16;
+      const bx = -w / 2, by = -hOf(id) - 34;
+      ctx.fillStyle = 'rgba(255,252,244,.96)';
+      ctx.beginPath(); ctx.roundRect(bx, by, w, 20, 9); ctx.fill();
+      ctx.strokeStyle = '#EFE0BE'; ctx.lineWidth = 1.4; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-4, by + 20); ctx.lineTo(4, by + 20); ctx.lineTo(0, by + 26); ctx.closePath();
+      ctx.fillStyle = 'rgba(255,252,244,.96)'; ctx.fill();
+      ctx.fillStyle = '#7A5C34'; ctx.textAlign = 'center'; ctx.fillText(txt, 0, by + 14);
+    }
     return;
   }
   ell(ctx, 0, 2, 9, 4.5, '#222', .2);
@@ -441,6 +456,7 @@ export class Renderer {
       sprites.push({ d: e.x + e.z, k: 'ent', e });
     }
     for (const d of G.drops) sprites.push({ d: d.x + d.z, k: 'drop', d });
+    if (G.pet) sprites.push({ d: G.pet.x + G.pet.z, k: 'pet', e: G.pet });
     for (const pr of G.projectiles) sprites.push({ d: pr.x + pr.z, k: 'proj', pr });
     for (const mt of G.meteors || []) sprites.push({ d: mt.x + mt.z, k: 'meteor', mt });
     for (const p of G.pois) {
@@ -471,6 +487,15 @@ export class Renderer {
         // 拾取光点
         ctx.fillStyle = 'rgba(255,240,160,.5)';
         ctx.beginPath(); ctx.arc(0, -10 + bobY, 9 + Math.sin(t * 5 + d.seed * 9) * 2, 0, Math.PI * 2); ctx.globalAlpha = .25; ctx.fill(); ctx.globalAlpha = 1;
+      }
+      else if (s.k === 'pet') {
+        const e = s.e;
+        const sprId = (G_PETS && G_PETS[e.type]?.spr) || e.type;
+        const bob = e.moving ? Math.abs(Math.sin(t * 10 + e.seed * 9)) * 3 : Math.sin(t * 2.5 + e.seed * 9) * 1.2;
+        drawSpr(ctx, sprId, e.type === 'dragon' ? 52 : 38, { bob, flip: e.dir === 1, shadowScale: .8 });
+        // 宠物星星标记
+        ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('⭐', 16, -40 + Math.sin(t * 3) * 2);
       }
       else if (s.k === 'proj') drawProjectile(ctx, s.pr, t);
       else if (s.k === 'meteor') drawMeteorMark(ctx, s.mt, t);
@@ -534,7 +559,52 @@ export class Renderer {
 
     this.renderLight(G);
     this.renderWeather(G);
+    this.renderAmbient(G);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  // 环境氛围：夜晚萤火虫 / 秋日落叶 / 雨天涟漪
+  renderAmbient(G) {
+    const ctx = this.ctx, t = G.time;
+    // 世界坐标粒子 → 屏幕投影（跟随镜头的小范围随机游走）
+    if (!this._ambient) {
+      this._ambient = [];
+      for (let i = 0; i < 26; i++) this._ambient.push({ ox: (Math.random() - .5), oy: (Math.random() - .5), ph: Math.random() * 9, sp: .3 + Math.random() * .7 });
+    }
+    const season = G.seasonIdx();
+    const biome = G.q.biomeAt(Math.floor(G.player.x), Math.floor(G.player.z));
+    const firefly = G.darkness > .25 && (biome === 'grass' || biome === 'forest' || biome === 'swamp');
+    const leaves = season === 2 && (biome === 'grass' || biome === 'forest');
+    const ripples = G.weather === 'rain' || G.weather === 'storm';
+    if (!firefly && !leaves && !ripples) return;
+    this.apply(ctx);
+    for (const a of this._ambient) {
+      a.ph += .016 * a.sp;
+      const wx = G.cam.x + Math.cos(a.ph * .7 + a.ox * 6) * 6 + a.ox * 10;
+      const wz = G.cam.z + Math.sin(a.ph * .5 + a.oy * 6) * 6 + a.oy * 10;
+      const p = worldToScreen(wx, wz);
+      if (firefly) {
+        const glow = (Math.sin(a.ph * 2.2) * .5 + .5) * .8;
+        ctx.globalAlpha = glow * .8;
+        ctx.fillStyle = '#ffe66a';
+        ctx.beginPath(); ctx.arc(p.x, p.y - 26 - Math.sin(a.ph) * 8, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = glow * .2;
+        ctx.beginPath(); ctx.arc(p.x, p.y - 26 - Math.sin(a.ph) * 8, 6, 0, Math.PI * 2); ctx.fill();
+      } else if (leaves) {
+        const fall = (a.ph * .35) % 1;
+        ctx.globalAlpha = .7 * (1 - fall * .4);
+        ctx.save(); ctx.translate(p.x + Math.sin(a.ph * 3) * 14, p.y - 60 + fall * 70); ctx.rotate(a.ph * 2);
+        ctx.fillStyle = ['#e8a13c', '#d8763c', '#c9a03c'][Math.floor(a.ox * 3 + 3) % 3];
+        ctx.beginPath(); ctx.ellipse(0, 0, 4.4, 2.2, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      } else if (ripples) {
+        const rp = (a.ph * .8) % 1;
+        ctx.globalAlpha = (1 - rp) * .35;
+        ctx.strokeStyle = '#cfe8f5'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.ellipse(p.x, p.y, rp * 14, rp * 7, 0, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
   }
 
   // 屏幕边缘指引箭头：指向目标世界点

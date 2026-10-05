@@ -7,6 +7,22 @@ import { Renderer } from './render.js';
 import { UI } from './ui.js';
 import { moveEntity, playerAttack, bestTool, dist } from './entities.js';
 import { loadAssets } from './assets.js';
+import { bgm } from './bgm.js';
+
+window.__bgmOn = true;
+window.__bgmToggle = () => {
+  const on = bgm.toggle();
+  window.__bgmOn = on;
+  ui.toast(on ? '🎵 音乐已开启' : '音乐已关闭');
+  if (on && G) updateBGM();
+};
+function updateBGM() {
+  if (!G || !window.__bgmOn) return;
+  const boss = G.entities.some(e => e.boss && !e.dead);
+  if (boss) bgm.play('boss');
+  else if (G.darkness > .25) bgm.play('night');
+  else bgm.play('day');
+}
 
 // ---------------- 音效（WebAudio 轻量合成） ----------------
 class Sfx {
@@ -78,6 +94,7 @@ function newGame(seed) {
   wire();
   startLoop();
   ui.startTutorial();
+  camIntro = 2.2; renderer.zoom = 1.7; // 开场运镜：从高空缓缓拉近
 }
 function continueGame() {
   const d = Game.load();
@@ -86,6 +103,11 @@ function continueGame() {
   G.applySave(d);
   wire();
   startLoop();
+  // 离线收益结算
+  const off = G.claimOffline();
+  if (off && off.got.length) {
+    ui.toast(`💤 离线 ${off.mins >= 60 ? Math.floor(off.mins / 60) + '小时' + off.mins % 60 + '分' : off.mins + '分钟'}，${off.settlers} 位居民帮你收获了：${off.got.join('、')}（已存入小镇仓库）`);
+  }
   ui.toast(`欢迎回来！第 ${G.day} 天`);
 }
 function wire() {
@@ -163,7 +185,7 @@ function screenToWorld(px, py) {
 }
 
 // ---------------- 主循环 ----------------
-let lastT = 0, started = false;
+let lastT = 0, started = false, camIntro = 0, bgmT = 0;
 function startLoop() {
   if (started) return; started = true;
   lastT = performance.now();
@@ -221,6 +243,16 @@ function tick(now) {
   // 玩家受击轻微震屏
   if (p.hitT > .15 && !G._hurtShake) { G._hurtShake = true; renderer.shake = Math.max(renderer.shake, .25); }
   if (p.hitT <= 0) G._hurtShake = false;
+  // 开场运镜
+  if (camIntro > 0) {
+    camIntro -= dt;
+    const k = Math.max(0, camIntro / 2.2);
+    renderer.zoom = 1 + k * .7;
+    if (camIntro <= 0) renderer.zoom = 1;
+  }
+  // BGM 状态切换（节流）
+  bgmT -= dt;
+  if (bgmT <= 0) { bgmT = 1; updateBGM(); }
   renderer.cam.x += (p.x - renderer.cam.x) * Math.min(1, dt * 6);
   renderer.cam.z += (p.z - renderer.cam.z) * Math.min(1, dt * 6);
   renderer.render(G);
@@ -244,8 +276,8 @@ function showTitle() {
     ${hasSave ? `<button id="btn-continue">▶ 继续拓荒</button><button id="btn-new" class="ghost-btn">🌱 新的开始</button>`
       : `<button id="btn-start">🔥 点燃篝火，开始拓荒</button>`}
   </div>`;
-  const start = () => { el.style.display = 'none'; sfx.ensure(); newGame(); };
-  const cont = () => { el.style.display = 'none'; sfx.ensure(); continueGame(); };
+  const start = () => { el.style.display = 'none'; sfx.ensure(); bgm.ensure(); if (bgm.ctx && bgm.ctx.state === 'suspended') bgm.ctx.resume(); newGame(); };
+  const cont = () => { el.style.display = 'none'; sfx.ensure(); bgm.ensure(); if (bgm.ctx && bgm.ctx.state === 'suspended') bgm.ctx.resume(); continueGame(); };
   document.getElementById(hasSave ? 'btn-continue' : 'btn-start').onclick = hasSave ? cont : start;
   if (hasSave) document.getElementById('btn-new').onclick = () => {
     if (confirm('开始新游戏会覆盖现有存档，确定？')) { localStorage.removeItem(CONFIG.SAVE_KEY); el.style.display = 'none'; sfx.ensure(); newGame(); }
