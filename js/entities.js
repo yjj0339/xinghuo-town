@@ -216,8 +216,8 @@ export function updateMonster(G, e, dt) {
       }
     }
   }
-  // 暗影瞬移
-  if (m.special === 'teleport' && target && d > 4 && Math.random() < dt * .3) {
+  // 暗影瞬移（d 在上面 if 块内，这里重新算距离）
+  if (m.special === 'teleport' && target && dist(e, target) > 4 && Math.random() < dt * .3) {
     e.x = target.x + (Math.random() - .5) * 3; e.z = target.z + (Math.random() - .5) * 3;
     G.particles && G.particles.push({ x: e.x, z: e.z, t: 0, kind: 'tp' });
   }

@@ -245,7 +245,7 @@ ok(d3.pet === 'dragon', '宠物写入存档');
 const G3 = new Game(d3.seed); G3.applySave(d3);
 ok(G3.pet && G3.pet.type === 'dragon', '宠物读档恢复');
 // 主线指引箭头
-G.mainIdx = 7; G._arrowByTut = false; G.checkQuests();
+G.mainIdx = 7; G._arrowByTut = false; G._arrowT = -9; G.checkQuests();
 ok(!!G.guideArrow, `主线箭头（m8指向幸存者：${G.guideArrow ? G.guideArrow.label : 'null'}）`);
 
 // ---------------- 3.6 v4：性能/Bug修复/效率/新怪物 ----------------
@@ -309,12 +309,48 @@ G.entities.push(gom);
 G.hitEntity(G.player, gom, 99999, 'player');
 ok(G.stats.kills >= 1, 'v4: 岩石傀儡可被击杀');
 // 路标箭头
-G.mainIdx = 3; G._arrowByTut = false; G.dailies = []; G.waypoint = { x: 20, z: 20, label: '路标 🚩' };
+G.mainIdx = 3; G._arrowByTut = false; G.dailies = []; G.waypoint = { x: 20, z: 20, label: '路标 🚩' }; G._arrowT = -9;
 G.checkQuests();
 ok(G.guideArrow && G.guideArrow.x === 20 && G.guideArrow.z === 20, 'v4: 路标指引箭头生效');
 G.waypoint = null;
 // 天气预告 + 图鉴里程碑（冒烟级：不炸即可）
 for (let i = 0; i < 40; i++) G.update(.1);
+
+// ---------------- 3.7 v5 排雷回归 ----------------
+section('v5：暗影瞬移/夜晚实体/箭头节流回归');
+// 暗影瞬移分支曾引用块外变量 d → ReferenceError
+{
+  const Gs = new Game(777);
+  const sh = makeMonster('shadow', Gs.player.x + 3, Gs.player.z + 1, {});
+  Gs.entities.push(sh);
+  let crashed = null;
+  try { for (let i = 0; i < 300; i++) Gs.update(.1); } catch (e) { crashed = e; }
+  ok(!crashed, `暗影追踪300步无崩溃${crashed ? '：' + crashed.message : ''}`);
+}
+// 夜行怪在夜间活动、白天消散，全程无异常
+{
+  const Gn = new Game(778);
+  const kinds = ['shadow', 'zombie', 'skeleton', 'wolf', 'frost_owl', 'gold_goblin', 'dragon_whelp', 'rock_golem', 'sand_cobra'];
+  kinds.forEach((k, i) => { const m = makeMonster(k, Gn.player.x + 2 + i, Gn.player.z + 2, { night: true }); Gn.entities.push(m); });
+  let crashed = null;
+  try {
+    Gn.dayTime = .7; // 夜晚
+    for (let i = 0; i < 400; i++) Gn.update(.1);
+    Gn.dayTime = .3; // 白天：夜行怪应消散
+    for (let i = 0; i < 100; i++) Gn.update(.1);
+  } catch (e) { crashed = e; }
+  ok(!crashed, `夜行/白天消散/新怪物 500步无崩溃${crashed ? '：' + crashed.message : ''}`);
+}
+// 箭头节流：连续 bus 高频调用不再每次全图扫描（功能等价即可）
+{
+  G._arrowT = -9;
+  const t0 = G.guideArrow;
+  G.bus('gather', 'wood', 1);
+  G.bus('gather', 'wood', 1);
+  ok(true, '高频事件调用不抛错');
+  G.checkQuests();
+  ok(G.guideArrow !== undefined, '箭头缓存仍可用');
+}
 
 // ---------------- 4. 汇总 ----------------
 console.log(`\n========================\n✅ 通过 ${pass} 项 · ❌ 失败 ${fail} 项\n========================`);

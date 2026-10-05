@@ -318,6 +318,13 @@ function runSmokeTest(mode) {
       step('放置篝火', () => { if (!G.placeBuilding('campfire', Math.floor(G.player.x) + 2, Math.floor(G.player.z))) throw new Error('place fail'); });
       step('装备武器', () => G.equip('stick'));
       step('夜袭', () => { G.day = 4; G.town.raidTonight = false; G.startRaid(); });
+      step('夜晚渲染', () => {
+        // 回归：萤火虫/落叶/涟漪/光照曾在 G.cam 上崩溃
+        G.day = 15; G.dayTime = .7; G.darkness = .5; G.weather = 'rain';
+        renderer.render(G);
+        G.weather = 'sunny';
+        renderer.render(G);
+      });
       step('存档', () => G.save(true));
       step('读档回路', () => { const d = JSON.parse(localStorage.getItem(CONFIG.SAVE_KEY)); if (!d) throw new Error('no save'); });
       step('回城', () => { G.homeCd = 0; G.homeTp(); });

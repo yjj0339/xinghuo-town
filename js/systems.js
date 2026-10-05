@@ -624,14 +624,16 @@ export class Game {
       this.toast(`✅ 主线「${mq.n}」目标达成！打开任务面板领取奖励`);
       this.sfx('quest');
     }
-    // 主线指引箭头（教程箭头优先，见 ui.updateTutorial）
+    // 主线指引箭头（教程箭头优先；每0.5s才算一次，bus()高频调用不重复扫图）
     if (!this._arrowByTut) {
-      let arr = this.mainQuestArrow();
-      // 日常采集类任务：指向最近的对应资源
-      if (!arr) arr = this.dailyArrow();
-      // 玩家设置的路标优先级最低
-      if (!arr && this.waypoint) arr = { x: this.waypoint.x, z: this.waypoint.z, label: this.waypoint.label || '路标 🚩' };
-      this.guideArrow = arr;
+      if (this.time - (this._arrowT || -9) >= .5) {
+        this._arrowT = this.time;
+        let arr = this.mainQuestArrow();
+        if (!arr) arr = this.dailyArrow();
+        if (!arr && this.waypoint) arr = { x: this.waypoint.x, z: this.waypoint.z, label: this.waypoint.label || '路标 🚩' };
+        this._arrowCache = arr;
+      }
+      this.guideArrow = this._arrowCache || null;
     }
   }
   // 日常任务的资源定位箭头
@@ -1210,7 +1212,7 @@ export class Game {
       const b = this.buildingAt(x, z);
       if (b) {
         const d = Math.hypot(x + .5 - p.x, z + .5 - p.z);
-        if (d < bd + .3) { bd = Math.min(bd, d); best = { kind: 'bld', x: x + .5, z: z + .5, b, tx: x, tz: z }; }
+        if (d < bd) { bd = d; best = { kind: 'bld', x: x + .5, z: z + .5, b, tx: x, tz: z }; }
       }
     }
     // POI
@@ -1544,7 +1546,8 @@ export class Game {
     this.housedAnimals = d.housed.map(h => ({ type: h.type, b: this.buildings.find(b => b.x === h.bx && b.z === h.bz), lastDay: h.lastDay })).filter(h => h.b);
     Object.assign(this.town, d.town);
     this.stats = d.stats || {}; this.claimedSides = d.claimedSides || []; this.mainIdx = d.mainIdx || 0; this.dailies = d.dailies || [];
-    this.codex = d.codex || this.codex; this.settings = d.settings || this.settings;
+    this.codex = d.codex || this.codex;
+    this.settings = Object.assign({ sfx: true, dmgNum: true, autoAtk: true }, d.settings || {});
     this.unlockedAch = new Set(d.unlockedAch || []);
     if (d.pet) this.adoptPet(d.pet, true);
     this._cookedKinds = new Set(d.cookedKinds || []);

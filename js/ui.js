@@ -131,8 +131,8 @@ export class UI {
   TUT_STEPS = [
     { id: 'move', icon: '👣', n: '学会移动', tip: '用 <b>WASD/方向键</b> 或<b>左侧摇杆</b>四处走走，熟悉一下你的营地', done: G => (G.movedDist || 0) > 6 },
     { id: 'tool', icon: '🪓', n: '制作工具', tip: '点右侧 <b>⚒️制作</b> → 用初始的木头和纤维，制作<b>木斧</b>和<b>木镐</b>（各需3木2纤维）', done: G => (G.stats.craft_axe_wood || 0) >= 1 && (G.stats.craft_pick_wood || 0) >= 1, glow: 'craft' },
-    { id: 'wood', icon: '🪵', n: '砍树收集木头', tip: '拿好斧头走到<b>树</b>旁，<b>连按 E</b>（或长按 ✋）砍树，收集 <b>8 块木头</b>。跟着屏幕上的橙色箭头走！', done: G => (G.stats.gather_wood || 0) >= 8 || G.count('wood') >= 8 || (G.buildCounts.campfire || 0) > 0, arrow: 'tree' },
-    { id: 'stone', icon: '🪨', n: '挖石头', tip: '用木镐敲<b>灰色岩石</b>，收集 <b>5 块石头</b>（没工具也能徒手挖，只是很慢）', done: G => (G.stats.gather_stone || 0) >= 5 || G.count('stone') >= 5 || (G.buildCounts.campfire || 0) > 0, arrow: 'rock' },
+    { id: 'wood', icon: '🪵', n: '砍树收集木头', tip: '拿好斧头走到<b>树</b>旁，<b>连按 E</b>（或长按 ✋）砍树，收集 <b>8 块木头</b>。跟着屏幕上的橙色箭头走！', done: G => (G.stats.gather_wood || 0) >= 8 || (G.buildCounts.campfire || 0) > 0, arrow: 'tree' },
+    { id: 'stone', icon: '🪨', n: '挖石头', tip: '用木镐敲<b>灰色岩石</b>，收集 <b>5 块石头</b>（没工具也能徒手挖，只是很慢）', done: G => (G.stats.gather_stone || 0) >= 5 || (G.buildCounts.campfire || 0) > 0, arrow: 'rock' },
     { id: 'campfire', icon: '🔥', n: '点燃篝火', tip: '点 <b>🔨建造</b> → 选<b>篝火</b> → 点击身边空地放置。篝火能照明取暖，是小镇的起点！', done: G => (G.buildCounts.campfire || 0) >= 1, glow: 'build' },
     { id: 'eat', icon: '🍎', n: '吃点东西', tip: '采集<b>浆果丛</b>（紫色果子的灌木），在<b>🎒背包</b>里点击吃掉，别让自己饿着', done: G => (G.stats.eat || 0) >= 1, glow: 'inventory' },
     { id: 'night', icon: '🌙', n: '度过一夜', tip: '天黑后怪物会出没！装备武器靠近按 <b>J/空格</b> 攻击（开启自动攻击更省心）。<br>危险时按 <b>🏠回城</b> 躲回营地！', done: G => G.day >= 2 || (G.stats.night_kills || 0) >= 1 },

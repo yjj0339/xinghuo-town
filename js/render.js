@@ -596,8 +596,8 @@ export class Renderer {
     this.apply(ctx);
     for (const a of this._ambient) {
       a.ph += .016 * a.sp;
-      const wx = G.cam.x + Math.cos(a.ph * .7 + a.ox * 6) * 6 + a.ox * 10;
-      const wz = G.cam.z + Math.sin(a.ph * .5 + a.oy * 6) * 6 + a.oy * 10;
+      const wx = this.cam.x + Math.cos(a.ph * .7 + a.ox * 6) * 6 + a.ox * 10;
+      const wz = this.cam.z + Math.sin(a.ph * .5 + a.oy * 6) * 6 + a.oy * 10;
       const p = worldToScreen(wx, wz);
       if (firefly) {
         const glow = (Math.sin(a.ph * 2.2) * .5 + .5) * .8;
