@@ -43,6 +43,7 @@ export class Game {
     this.paused = false; this.gameSpeed = 1;
     this.sfxFn = () => { }; this.toastFn = () => { };
     this.spawnT = 0; this.animalT = 0; this.achT = 0; this.autosaveT = 0; this.eventT = 0;
+    this.regrowSet = new Set(); // 正在重生的资源格索引（避免每帧全图扫描）
     this.housedAnimals = []; // {type, buildingIdx, lastProduce}
     this.townCenter = { x: this.world.center.x + .5, z: this.world.center.z + .5 };
     this.player = makePlayer(this.townCenter.x, this.townCenter.z);
@@ -254,22 +255,24 @@ export class Game {
     for (let i = 0; i < 6; i++) this.particles.push({ x: tx + .5, z: tz + .5, y: -10, t: 0, kind: 'poof', vx: (this.rng() - .5) * 2, vz: (this.rng() - .5) * 2 });
     return true;
   }
-  dismantle(b) {
+  dismantle(b, noRefund) {
     const idx = this.buildings.indexOf(b); if (idx < 0) return;
     const list = this.buildMap.get(b.z * 1000 + b.x); if (list) { const i = list.indexOf(b); if (i >= 0) list.splice(i, 1); if (!list.length) this.buildMap.delete(b.z * 1000 + b.x); }
     this.buildings.splice(idx, 1);
     this.buildCounts[b.id] = Math.max(0, (this.buildCounts[b.id] || 1) - 1);
-    for (const [i, n] of BUILDINGS[b.id].cost) this.give(i, Math.ceil(n / 2));
-    this.sfx('build'); this.toast(`拆除 ${BUILDINGS[b.id].n}，返还一半材料`);
+    if (!noRefund) {
+      for (const [i, n] of BUILDINGS[b.id].cost) this.give(i, Math.ceil(n / 2));
+      this.sfx('build'); this.toast(`拆除 ${BUILDINGS[b.id].n}，返还一半材料`);
+    }
     // 农田上的动物解绑
     this.housedAnimals = this.housedAnimals.filter(a => a.b !== b);
   }
-  damageBuilding(b, dmg) {
+  damageBuilding(b, dmg, noRefund) {
     b.hp -= dmg; b.hitT = .2;
     if (b.hp <= 0) {
       this.toast(`${BUILDINGS[b.id].n} 被摧毁了！`); this.sfx('boom');
-      this.dismantle(b); // 无返还
-      for (const [i, n] of []) { }
+      if (this.renderer) this.renderer.shake = Math.max(this.renderer.shake || 0, .4);
+      this.dismantle(b, noRefund === true);
     }
   }
 
@@ -412,6 +415,17 @@ export class Game {
     return p && p.buff === kind ? p.mul : 0;
   }
   releasePet() { this.pet = null; this.toast('宠物回到大自然去了'); }
+
+  // ---------- 背包整理 ----------
+  sortInv() {
+    const cat = id => { const it = ITEMS[id]; return it ? ({ tool: 0, weapon: 1, armor: 2, food: 3, seed: 4, res: 5, special: 6, fish: 7 }[it.c] ?? 8) : 9; };
+    const slots = this.player.inv.filter(Boolean);
+    slots.sort((a, b) => cat(a.id) - cat(b.id) || (ITEMS[a.id].n > ITEMS[b.id].n ? 1 : -1));
+    this.player.inv = new Array(40).fill(null);
+    slots.forEach((s, i) => { this.player.inv[i] = s; });
+    this.sfx('equip');
+    this.toast('🎒 背包已整理');
+  }
 
   // ---------- 离线收益 ----------
   calcOffline() {
@@ -612,8 +626,46 @@ export class Game {
     }
     // 主线指引箭头（教程箭头优先，见 ui.updateTutorial）
     if (!this._arrowByTut) {
-      this.guideArrow = this.mainQuestArrow();
+      let arr = this.mainQuestArrow();
+      // 日常采集类任务：指向最近的对应资源
+      if (!arr) arr = this.dailyArrow();
+      // 玩家设置的路标优先级最低
+      if (!arr && this.waypoint) arr = { x: this.waypoint.x, z: this.waypoint.z, label: this.waypoint.label || '路标 🚩' };
+      this.guideArrow = arr;
     }
+  }
+  // 日常任务的资源定位箭头
+  dailyArrow() {
+    const ITEM2OBJ = {
+      wood: [['tree', 'tree_pine', 'tree_big', 'apple_tree'], '木材 🪓'],
+      stone: [['rock', 'rock_sand'], '石料 ⛏️'],
+      fiber: [['grass_tuft', 'reeds'], '纤维 🌿'],
+      egg: [null, null], // 鸡蛋不指引
+    };
+    for (const q of this.dailies || []) {
+      const g = q.goals[0];
+      if (g.t !== 'gather_have' || this.dailyProgress(q) >= g.n) continue;
+      const map = ITEM2OBJ[g.item];
+      if (!map || !map[0]) continue;
+      const t = this.nearestObjOf(map[0]);
+      if (t) return { ...t, label: `日常·${map[1]}` };
+    }
+    return null;
+  }
+  nearestObjOf(ids) {
+    const p = this.player;
+    let best = null, bd = 50;
+    const tx = Math.floor(p.x), tz = Math.floor(p.z);
+    for (let dz = -30; dz <= 30; dz++) for (let dx = -30; dx <= 30; dx++) {
+      const x = tx + dx, z = tz + dz;
+      if (!this.q.inBounds(x, z)) continue;
+      const o = this.world.obj[z * this.world.W + x];
+      if (o && o.id && ids.includes(o.id)) {
+        const d = Math.hypot(x + .5 - p.x, z + .5 - p.z);
+        if (d < bd) { bd = d; best = { x: x + .5, z: z + .5 }; }
+      }
+    }
+    return best;
   }
   mainQuestArrow() {
     const p = this.player;
@@ -707,6 +759,8 @@ export class Game {
     else if (s === 1) this.weather = roll < .35 ? 'sunny' : roll < .5 ? 'cloud' : roll < .62 ? 'rain' : roll < .68 ? 'storm' : roll < .8 ? 'heat' : 'fog';
     else this.weather = roll < .5 ? 'sunny' : roll < .68 ? 'cloud' : roll < .84 ? 'rain' : roll < .89 ? 'storm' : 'fog';
     // 雨天自动浇水
+    const WN = { sunny: '☀️ 晴朗', cloud: '⛅ 多云', rain: '🌧️ 下雨', storm: '⛈️ 雷暴', fog: '🌫️ 大雾', heat: '🔥 热浪', snow: '🌨️ 降雪', blizzard: '❄️ 暴风雪' };
+    this.toast(`📅 第 ${this.day} 天 · ${SEASONS[newSeason]}季 · 今日天气：${WN[this.weather] || this.weather}`);
     if (this.weather === 'rain' || this.weather === 'storm') for (const b of this.buildings) if (b.crop) b.crop.watered = true;
     else for (const b of this.buildings) if (b.crop) b.crop.watered = false;
     // 作物枯萎：不适合季节的停止生长（不死亡）
@@ -993,18 +1047,32 @@ export class Game {
         if (CROPS[b.crop.id].seasons.includes(this.seasonIdx())) b.crop.growth = Math.min(1, b.crop.growth + dt / (CROPS[b.crop.id].days * CONFIG.DAY_LEN));
       }
     }
-    // 资源重生
+    // 资源重生（只遍历正在重生的格子）
     const objArr = this.world.obj;
-    for (let i = 0; i < objArr.length; i++) {
+    for (const i of this.regrowSet) {
       const o = objArr[i];
-      if (o && o.t > 0) { o.t -= dt; if (o.t <= 0 && o.regrowId) { objArr[i] = { id: o.regrowId, hp: WORLD_OBJECTS[o.regrowId].hp, t: 0, v: Math.floor(this.rng() * 3) }; } }
+      if (!o || !o.regrowId) { this.regrowSet.delete(i); continue; }
+      o.t -= dt;
+      if (o.t <= 0) {
+        const id = o.regrowId;
+        objArr[i] = { id, hp: WORLD_OBJECTS[id].hp, t: 0, v: Math.floor(this.rng() * 3) };
+        this.regrowSet.delete(i);
+      }
     }
     // 实体更新
     for (const e of this.entities) {
       if (e.dead) continue;
       if (e.kind === 'monster') {
-        // 图鉴登记
-        if (Math.abs(e.x - p.x) < 12 && !this.codex.monsters[e.type]) this.codex.monsters[e.type] = { seen: this.day, kills: 0 };
+        // 图鉴登记（里程碑奖励技能点）
+        if (Math.abs(e.x - p.x) < 12 && !this.codex.monsters[e.type]) {
+          this.codex.monsters[e.type] = { seen: this.day, kills: 0 };
+          const seen = Object.keys(this.codex.monsters).length;
+          if (seen === 10 || seen === 20 || seen === 30) {
+            this.player.skillPts++;
+            this.toast(`📖 怪物图鉴收录达 ${seen} 种！奖励 1 技能点（设置面板加点）`);
+            this.sfx('level');
+          }
+        }
         // 状态效果
         if (e.burnT > 0) { e.burnT -= dt; e.hp -= dt * 4; if (e.hp <= 0) { this.killMonster(e, 'player'); continue; } }
         e.spdMul = e.slowT > 0 ? .5 : 1; if (e.slowT > 0) e.slowT -= dt;
@@ -1015,12 +1083,15 @@ export class Game {
       else if (e.kind === 'animal') { if (Math.abs(e.x - p.x) < 40) updateAnimal(this, e, dt); }
       else if (e.kind === 'npc') {
         if (e.escorting) {
-          // 护送中的幸存者：跟随玩家，抵达小镇即安顿
+          // 护送中的幸存者：跟随玩家，抵达小镇即安顿（掉队太远自动追上）
           const d = dist(e, p);
           if (Math.hypot(e.x - this.townCenter.x, e.z - this.townCenter.z) < CONFIG.TOWN_RADIUS * .6) {
             e.escorting = false;
             this.toast(`🏡 ${e.name} 在小镇安顿下来了！可在「小镇」面板为 TA 分配职业`);
             this.bus('recruit'); this.sfx('join');
+          } else if (d > 12) {
+            e.x = p.x - 1; e.z = p.z;
+            this.particles.push({ x: e.x, z: e.z, y: -20, t: 0, kind: 'tp' });
           } else if (d > 1.8) {
             moveEntity(this, e, p.x - e.x, p.z - e.z, dt);
           } else e.moving = false;
@@ -1062,11 +1133,13 @@ export class Game {
       }
       if (b.hitT > 0) b.hitT -= dt;
     }
-    // 粒子/飘字
+    // 粒子/飘字（带上限防堆积）
     for (const pa of this.particles) { pa.t += dt; pa.x += (pa.vx || 0) * dt; pa.z += (pa.vz || 0) * dt; pa.y = (pa.y || -10) - dt * 8; }
     this.particles = this.particles.filter(pa => pa.t < .8);
+    if (this.particles.length > 150) this.particles.splice(0, this.particles.length - 150);
     for (const f of this.floaters) { f.life -= dt; f.y -= dt * 26; }
     this.floaters = this.floaters.filter(f => f.life > 0);
+    if (this.floaters.length > 60) this.floaters.splice(0, this.floaters.length - 60);
     // 刷怪
     this.ambientSpawn(dt);
     // 发现 POI
@@ -1224,7 +1297,9 @@ export class Game {
           if (this.rng() < Math.min(.9, ch * (rich - 1))) this.spawnDrop(t.tx + .5, t.tz + .5, id, mn);
         }
         const regrow = def.regrow;
-        this.world.obj[t.tz * this.world.W + t.tx] = regrow > 0 ? { regrowId: def.id, id: null, t: regrow } : null;
+        const nextObj = regrow > 0 ? { regrowId: t.obj.id, id: null, t: regrow } : null;
+        this.world.obj[t.tz * this.world.W + t.tx] = nextObj;
+        if (nextObj) this.regrowSet.add(t.tz * this.world.W + t.tx);
         this.bus('gather', def.drops[0][0], 0); // 计数走 spawnDrop 的 pickup
       }
       return true;
@@ -1407,14 +1482,13 @@ export class Game {
     if (!this.recipeUnlocked(r)) return false;
     return r.in.every(([id, n]) => this.count(id) >= n);
   }
-  craft(r) {
-    if (!this.canCraft(r)) { this.toast(r.unlock && !this.recipeUnlocked(r) ? '尚未解锁（提升小镇等级）' : '材料不足'); return false; }
+  craft(r, silent) {
+    if (!this.canCraft(r)) { if (!silent) this.toast(r.unlock && !this.recipeUnlocked(r) ? '尚未解锁（提升小镇等级）' : '材料不足'); return false; }
     for (const [id, n] of r.in) this.take(id, n);
     const n = r.out[1] || 1;
-    if (!addItem(this.player.inv, r.out[0], n)) { this.toast('背包已满！'); for (const [id, m] of r.in) this.give(id, m); return false; }
+    if (!addItem(this.player.inv, r.out[0], n)) { if (!silent) this.toast('背包已满！'); for (const [id, m] of r.in) this.give(id, m); return false; }
     this.bus('craft', r.out[0], n);
-    this.sfx('craft');
-    this.toast(`制作了 ${ITEMS[r.out[0]].n}×${n}`);
+    if (!silent) { this.sfx('craft'); this.toast(`制作了 ${ITEMS[r.out[0]].n}×${n}`); }
     return true;
   }
 
@@ -1457,7 +1531,7 @@ export class Game {
     for (const [k, v] of Object.entries(d.objDiff || {})) {
       const i = +k;
       if (v === 0) this.world.obj[i] = null;
-      else if (v.r) this.world.obj[i] = { regrowId: v.r, id: null, t: v.t };
+      else if (v.r) { this.world.obj[i] = { regrowId: v.r, id: null, t: v.t }; this.regrowSet.add(i); }
       else if (v.hp !== undefined) { const o = this.world.obj[i]; if (o) o.hp = v.hp; }
     }
     this.pois = d.pois;

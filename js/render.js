@@ -37,6 +37,7 @@ const SPRITE_H = {
   treant_sap: 66, mush_toxic: 46, croc: 58, bog_lurker: 68, scorpion: 50, mummy: 62, sandworm: 68, yeti: 72, banshee: 68,
   bat_fire: 46, demon_imp: 56, demon_lava: 76, skeleton: 60, zombie: 60, shadow: 62,
   goblin_king: 110, ice_queen: 114, flame_lord: 118, treant_ancient: 130,
+  sand_cobra: 60, frost_owl: 48, rock_golem: 88,
   chicken: 40, cow: 62, sheep: 52, deer: 58,
   player: 68, npc_worker: 68, npc_guard: 70, npc_medic: 68, merchant: 68,
 };
@@ -467,7 +468,10 @@ export class Renderer {
       if (Math.abs(e.x - cx) > range + 2 || Math.abs(e.z - cz) > range + 2) continue;
       sprites.push({ d: e.x + e.z, k: 'ent', e });
     }
-    for (const d of G.drops) sprites.push({ d: d.x + d.z, k: 'drop', d });
+    for (const d of G.drops) {
+      if (Math.abs(d.x - cx) > range + 2 || Math.abs(d.z - cz) > range + 2) continue;
+      sprites.push({ d: d.x + d.z, k: 'drop', d });
+    }
     if (G.pet) sprites.push({ d: G.pet.x + G.pet.z, k: 'pet', e: G.pet });
     for (const pr of G.projectiles) sprites.push({ d: pr.x + pr.z, k: 'proj', pr });
     for (const mt of G.meteors || []) sprites.push({ d: mt.x + mt.z, k: 'meteor', mt });

@@ -384,6 +384,17 @@ export class UI {
           case 'use': G.useItem(+a1); break;
           case 'drop': { const s = G.player.inv[+a1]; if (s) { G.spawnDrop(G.player.x, G.player.z, s.id, s.n); G.take(s.id, s.n); } break; }
           case 'craft': { const r = RECIPES.find(x => x.id === a1); if (r) G.craft(r); break; }
+          case 'craft5': {
+            const r5 = RECIPES.find(x => x.id === a1);
+            if (r5) {
+              let made = 0;
+              for (let i = 0; i < 5; i++) { if (G.craft(r5, true)) made++; else break; }
+              if (made) { G.toast(`批量制作 ${ITEMS[r5.out[0]].n} ×${made}`); G.sfx('craft'); }
+              else G.toast('材料不足');
+            }
+            break;
+          }
+          case 'sortinv': G.sortInv(); break;
           case 'build': this.selectBuild(a1); break;
           case 'dismantle': this.dismantleMode = !this.dismantleMode; this.buildSel = null; this.G.ghost = null; break;
           case 'claimmain': G.claimMain(); break;
@@ -403,6 +414,12 @@ export class UI {
           }
           case 'take': { const s = G.town.storage[+a1]; if (s && G.give(s.id, s.n)) G.town.storage[+a1] = null; break; }
           case 'takeall': { for (let i = 0; i < G.town.storage.length; i++) { const s = G.town.storage[i]; if (s && G.give(s.id, s.n)) G.town.storage[i] = null; } break; }
+          case 'storeall': {
+            let stored = 0;
+            for (let i = 0; i < G.player.inv.length; i++) { const s = G.player.inv[i]; if (s && G.addStorage(s.id, s.n)) { G.take(s.id, s.n); stored++; } }
+            G.toast(stored ? `已把 ${stored} 格背包存入小镇仓库` : '背包没有可存的东西（或仓库满了）');
+            break;
+          }
           case 'store': { const s = G.player.inv[+a1]; if (s && G.addStorage(s.id, s.n)) G.take(s.id, s.n); break; }
           case 'tab': this.craftTab = a1; this.buildTab = a1; this.codexTab = a1; this.questTab = a1; break;
           case 'unequip': G.player.equip[a1] = null; break;
@@ -468,10 +485,8 @@ export class UI {
       <div class="equip-col">
         <div class="sec-title">装备</div>
         ${eqRow('head', '头部')}${eqRow('body', '身体')}${eqRow('feet', '脚部')}${eqRow('acc', '饰品')}${eqRow('hand', '武器')}
-        <div class="sec-title">属性</div>
-        <div class="stat-mini">防御 ${playerDefense(p)} · 体温调节 ${p.temp}°</div>
         <div class="sec-title">操作</div>
-        <button data-act="store-all" style="display:none"></button>
+        <button class="mini-btn" data-act="sortinv" style="width:100%;padding:6px">🧹 整理背包</button>
       </div>
       <div class="inv-grid">${slots}</div>
     </div>
@@ -491,7 +506,7 @@ export class UI {
       rows += `<div class="recipe-row ${unlocked ? '' : 'locked'}">
         <div class="r-ico"><img src="${this.iconURL(r.out[0])}"></div>
         <div class="r-main"><b>${ITEMS[r.out[0]].n}${r.out[1] > 1 ? '×' + r.out[1] : ''}</b><div class="mats">${mats}</div><div class="r-desc">${ITEMS[r.out[0]].d || ''}</div></div>
-        ${unlocked ? `<button class="craft-btn ${can ? '' : 'dis'}" data-act="craft" data-a1="${r.id}">制作</button>` : '<span class="lock-tag">未解锁</span>'}
+        ${unlocked ? `<button class="craft-btn ${can ? '' : 'dis'}" data-act="craft5" data-a1="${r.id}">×5</button><button class="craft-btn ${can ? '' : 'dis'}" data-act="craft" data-a1="${r.id}">制作</button>` : '<span class="lock-tag">未解锁</span>'}
       </div>`;
     }
     return tabs + (stations.length === 1 ? '<div class="hint">建造工作台/熔炉等设施解锁更多配方</div>' : '') + rows;
@@ -575,7 +590,7 @@ export class UI {
       ${G.town.wandererWaiting ? `<button class="craft-btn" data-act="recruitw">🚶 招募流浪者（80金币）</button>` : ''}
       <div class="sec-title">居民职业（选择岗位后自动开工）</div>
       <div class="settlers">${settlers || '<div class="hint">还没有居民 —— 去地图上寻找幸存者，或等待流浪者事件</div>'}</div>
-      <div class="sec-title">小镇仓库 ${G.town.storage.filter(Boolean).length}/${G.storageCap()} <button class="mini-btn" data-act="takeall">全部取出</button></div>
+      <div class="sec-title">小镇仓库 ${G.town.storage.filter(Boolean).length}/${G.storageCap()} <button class="mini-btn" data-act="takeall">全部取出</button> <button class="mini-btn" data-act="storeall">背包全存入</button></div>
       <div class="inv-grid small">${storage}</div>
       <div class="sec-title">牧场</div>
       <div>${ranch || '<span class="hint">用饲料引诱鸡/牛/羊，带回对应棚舍即可收养</span>'}</div>`;
@@ -624,7 +639,7 @@ export class UI {
   }
   htmlMap() {
     return `<div class="map-wrap"><canvas id="big-map" width="440" height="440"></canvas>
-      <div class="map-legend"><span>🟣 祭坛</span><span>🟠 废墟</span><span>🟡 宝箱</span><span>⬜ 建筑</span><span>🔴 怪物</span></div></div>`;
+      <div class="map-legend"><span>🟣 祭坛</span><span>🟠 废墟</span><span>🟡 宝箱</span><span>⬜ 建筑</span><span>🔴 怪物</span><span>👆 点地图设路标🚩（跟着箭头走，再点取消）</span></div></div>`;
   }
   htmlSettings() {
     const G = this.G;
@@ -702,6 +717,25 @@ export class UI {
       if (p.type === 'meteor') { ctx.fillStyle = '#3cd8e8'; ctx.fillText('陨星', p.x * sc - 11, p.z * sc - 5); }
     }
     ctx.fillStyle = '#e05c5c'; ctx.fillText('🏠', G.townCenter.x * sc - 6, G.townCenter.z * sc - 6);
+    // 路标
+    if (G.waypoint) { ctx.font = '14px sans-serif'; ctx.fillText('🚩', G.waypoint.x * sc - 7, G.waypoint.z * sc + 5); }
+    // 点击设路标（只绑一次）
+    if (!cv.__bound) {
+      cv.__bound = true;
+      cv.addEventListener('click', e => {
+        const rect = cv.getBoundingClientRect();
+        const wx = (e.clientX - rect.left) / rect.width * G.world.W;
+        const wz = (e.clientY - rect.top) / rect.height * G.world.H;
+        if (G.waypoint && Math.hypot(G.waypoint.x - wx, G.waypoint.z - wz) < 4) {
+          G.waypoint = null; G.guideArrow = null;
+          this.toast('🚩 已取消路标');
+        } else {
+          G.waypoint = { x: wx, z: wz, label: '路标 🚩' };
+          this.toast('🚩 路标已设置！关闭地图跟着橙色箭头走（再点一下路标可取消）');
+        }
+        this.renderBigMap();
+      });
+    }
   }
 }
 

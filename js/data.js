@@ -21,10 +21,10 @@ export const PHASES = { dawn: [0, .07], day: [.07, .5], dusk: [.5, .58], night: 
 export const BIOMES = {
   grass:   { n: '翡翠草原', g: ['#8fd06a', '#84c962', '#99d873'], temp: 0,   mon: ['slime', 'wolf', 'boar', 'zombie', 'skeleton'] },
   forest:  { n: '迷雾森林', g: ['#6fb857', '#64ad4d', '#79c25f'], temp: -2,  mon: ['goblin', 'goblin_archer', 'wolf', 'treant_sap', 'spider', 'zombie', 'skeleton'] },
-  desert:  { n: '金沙荒漠', g: ['#e8d08a', '#e2c87e', '#eeda96'], temp: 12,  mon: ['scorpion', 'mummy', 'sandworm'] },
-  snow:    { n: '霜语雪原', g: ['#e9f2f6', '#dfeaf1', '#f2f9fc'], temp: -16, mon: ['slime_ice', 'wolf_snow', 'yeti', 'banshee'] },
+  desert:  { n: '金沙荒漠', g: ['#e8d08a', '#e2c87e', '#eeda96'], temp: 12,  mon: ['scorpion', 'mummy', 'sandworm', 'sand_cobra'] },
+  snow:    { n: '霜语雪原', g: ['#e9f2f6', '#dfeaf1', '#f2f9fc'], temp: -16, mon: ['slime_ice', 'wolf_snow', 'yeti', 'banshee', 'frost_owl'] },
   swamp:   { n: '幽泽湿地', g: ['#7a9b5e', '#709154', '#84a668'], temp: 2,   mon: ['mush_toxic', 'spider', 'croc', 'bog_lurker'] },
-  volcano: { n: '烬岩火山', g: ['#6b5a56', '#615250', '#75645f'], temp: 22,  mon: ['bat_fire', 'slime_lava', 'demon_imp', 'demon_lava', 'dragon_whelp'] },
+  volcano: { n: '烬岩火山', g: ['#6b5a56', '#615250', '#75645f'], temp: 22,  mon: ['bat_fire', 'slime_lava', 'demon_imp', 'demon_lava', 'dragon_whelp', 'rock_golem'] },
   water:   { n: '碧波',     g: ['#5fb7d4', '#57aecd', '#69c1dc'], temp: 0,   mon: [] },
   sand:    { n: '河岸',     g: ['#ecd9a4', '#e6d298', '#f2e0ae'], temp: 6,   mon: [] },
 };
@@ -366,6 +366,9 @@ export const MONSTERS = {
                 drops: [['essence_fire', 1, 2, .7], ['obsidian', 1, 2, .5], ['ore_gold', 1, 1, .15]] },
   gold_goblin:{ n: '宝藏地精', tier: 2, hp: 60,  dmg: 8,  spd: 3.4, aggro: 0, xp: 60, passive: true, special: 'flee',
                 drops: [['coin', 30, 80, 1], ['map_treasure', 1, 1, .15]] },
+  sand_cobra: { n: '沙漠毒蟒', tier: 3, hp: 90,  dmg: 16, spd: 2.3, aggro: 5.5, xp: 34, poison: true, drops: [['fang', 1, 2, .5], ['chitin', 1, 1, .4], ['sulfur', 1, 1, .25]] },
+  frost_owl:  { n: '冰原雪枭', tier: 2, hp: 45,  dmg: 12, spd: 3.0, aggro: 7, xp: 26, night: true, fly: true, slow: true, drops: [['feather', 2, 4, .8], ['essence_ice', 1, 1, .3]] },
+  rock_golem: { n: '岩石傀儡', tier: 4, hp: 260, dmg: 30, spd: 1.2, aggro: 5, xp: 90, drops: [['stone', 4, 6, 1], ['obsidian', 1, 1, .3], ['crystal', 1, 1, .15], ['ore_gold', 1, 1, .1]] },
   // —— Boss
   goblin_king:{ n: '哥布林王', tier: 5, hp: 700, dmg: 28, spd: 2.0, aggro: 9, xp: 500, boss: true, special: 'summon', size: 1.6,
                 drops: [['trophy_goblin', 1, 1, 1], ['bar_gold', 2, 3, 1], ['badge_goblin', 5, 10, 1]] },

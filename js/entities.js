@@ -171,10 +171,10 @@ export function updateMonster(G, e, dt) {
         G.hitEntity(e, target, m.dmg);
       }
     }
-    // 袭击时破坏挡路建筑
+    // 袭击时破坏挡路建筑（被摧毁不返还材料）
     if (e.raid && d > range) {
       const b = G.buildingNear(e.x, e.z, 1.4);
-      if (b && BUILDINGS[b.id]?.hp && !BUILDINGS[b.id].walk) { e.atkCd = Math.max(e.atkCd, .8); G.damageBuilding(b, m.dmg * dt * 1.5); e.atkT = .2; }
+      if (b && BUILDINGS[b.id]?.hp && !BUILDINGS[b.id].walk) { e.atkCd = Math.max(e.atkCd, .8); G.damageBuilding(b, m.dmg * dt * 1.5, true); e.atkT = .2; }
     }
   } else {
     // 游荡
@@ -290,7 +290,10 @@ export function updateNPC(G, e, dt) {
           if (obj.hp <= 0) {
             const def = WORLD_OBJECTS[obj.id];
             for (const [id, mn, mx, ch] of def.drops) if (Math.random() < ch) G.addStorage(id, Math.floor(mn + Math.random() * (mx - mn + 1)));
-            G.world.obj[t.idx] = null; G.renderer && (G.renderer.mmDirty = false);
+            // 留下会重生的树桩，避免居民把资源砍绝
+            const stump = def.regrow > 0 ? { regrowId: obj.id, id: null, t: def.regrow } : null;
+            G.world.obj[t.idx] = stump;
+            if (stump) G.regrowSet.add(t.idx);
             e.target = null; G.bus('npc_work', e.job);
           }
         }

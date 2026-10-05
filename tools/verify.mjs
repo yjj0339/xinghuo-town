@@ -248,6 +248,74 @@ ok(G3.pet && G3.pet.type === 'dragon', '宠物读档恢复');
 G.mainIdx = 7; G._arrowByTut = false; G.checkQuests();
 ok(!!G.guideArrow, `主线箭头（m8指向幸存者：${G.guideArrow ? G.guideArrow.label : 'null'}）`);
 
+// ---------------- 3.6 v4：性能/Bug修复/效率/新怪物 ----------------
+section('v4：重生Set/整理背包/批量制作/拆毁不返还/新怪物/路标');
+// 重生：徒手砍倒树后应进入 regrowSet，时间到后复原
+{
+  const Gr = new Game(9999);
+  Gr.player.inv = new Array(40).fill(null);
+  let tr = null;
+  const px = Math.floor(Gr.player.x), pz = Math.floor(Gr.player.z);
+  outer2: for (let r = 1; r < 40; r++) {
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      const x = px + dx, z = pz + dz;
+      if (!Gr.q.inBounds(x, z)) continue;
+      const o = Gr.world.obj[z * Gr.world.W + x];
+      if (o && ['tree', 'tree_pine', 'tree_big'].includes(o.id)) { tr = { x, z, o, idx: z * Gr.world.W + x }; break outer2; }
+    }
+  }
+  ok(!!tr, 'v4: 找到测试树');
+  if (tr) {
+    Gr.player.x = tr.x + 1.5; Gr.player.z = tr.z + .5;
+    Gr.target = Gr.interactTarget();
+    let guard = 0;
+    while (tr.o.hp > 0 && guard++ < 30) Gr.interact();
+    const stump = Gr.world.obj[tr.idx];
+    ok(stump && stump.regrowId && Gr.regrowSet.has(tr.idx), 'v4: 砍倒后进入重生队列');
+    let t2 = 0;
+    while (Gr.regrowSet.has(tr.idx) && t2++ < 3000) Gr.update(.1);
+    const back = Gr.world.obj[tr.idx];
+    ok(back && back.id === stump.regrowId && !Gr.regrowSet.has(tr.idx), `v4: 资源重生复原（${back && back.id}，${t2 * .1}s）`);
+  }
+}
+// 整理背包
+G.player.inv = new Array(40).fill(null);
+G.give('fish_carp', 2); G.give('wood', 3); G.give('sword_iron', 1); G.give('berry', 5);
+G.sortInv();
+ok(G.player.inv[0].id === 'sword_iron', `整理：武器排最前（${G.player.inv[0].id}）`);
+// 批量制作
+G.player.inv = new Array(40).fill(null);
+G.give('wood', 24); G.give('stone', 12); G.give('fiber', 8);
+const rBench = RECIPES.find(r => r.out[0] === 'spear');
+let made5 = 0;
+for (let i = 0; i < 5; i++) { if (G.craft(rBench, true)) made5++; else break; }
+ok(made5 === 5, `批量制作×5（实际${made5}）`);
+// 拆毁不返还
+G.player.inv = new Array(40).fill(null);
+G.give('wood', 50); G.give('stone', 50);
+G.placeBuilding('campfire', c.x + 3, c.z);
+const woodBefore = countItem(G.player.inv, 'wood') + countItem(G.town.storage, 'wood');
+const bf = G.buildingAt(c.x + 3, c.z);
+G.damageBuilding(bf, 9999, true);
+ok(!G.buildingAt(c.x + 3, c.z), 'v4: 建筑被摧毁');
+const woodAfter = countItem(G.player.inv, 'wood') + countItem(G.town.storage, 'wood');
+ok(woodAfter === woodBefore, `v4: 怪物拆毁不返还材料（${woodBefore}→${woodAfter}）`);
+// NPC 砍树后留树桩（用 findWorkObject 逻辑验证 regrowSet 存在即可——上面已覆盖玩家路径）
+// 新怪物
+ok(!!MONSTERS.sand_cobra && !!MONSTERS.frost_owl && !!MONSTERS.rock_golem, 'v4: 三新怪物数据存在');
+ok(BIOMES.desert.mon.includes('sand_cobra') && BIOMES.snow.mon.includes('frost_owl') && BIOMES.volcano.mon.includes('rock_golem'), 'v4: 新怪物进生态区池');
+const gom = makeMonster('rock_golem', 6, 6, {});
+G.entities.push(gom);
+G.hitEntity(G.player, gom, 99999, 'player');
+ok(G.stats.kills >= 1, 'v4: 岩石傀儡可被击杀');
+// 路标箭头
+G.mainIdx = 3; G._arrowByTut = false; G.dailies = []; G.waypoint = { x: 20, z: 20, label: '路标 🚩' };
+G.checkQuests();
+ok(G.guideArrow && G.guideArrow.x === 20 && G.guideArrow.z === 20, 'v4: 路标指引箭头生效');
+G.waypoint = null;
+// 天气预告 + 图鉴里程碑（冒烟级：不炸即可）
+for (let i = 0; i < 40; i++) G.update(.1);
+
 // ---------------- 4. 汇总 ----------------
 console.log(`\n========================\n✅ 通过 ${pass} 项 · ❌ 失败 ${fail} 项\n========================`);
 process.exit(fail ? 1 : 0);
