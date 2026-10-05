@@ -118,6 +118,12 @@ export function updateMonster(G, e, dt) {
   // 被动生物
   if (m.passive) {
     e.wanderT -= dt;
+    if (m.special === 'flee') { // 宝藏地精：一直逃离玩家
+      const d = dist(e, p);
+      if (d < 14) { moveEntity(G, e, e.x - p.x, e.z - p.z, dt); }
+      else e.moving = false;
+      return;
+    }
     if (e.wanderT <= 0) { e.wanderT = 2 + Math.random() * 3; e.wx = e.homeX + (Math.random() - .5) * 8; e.wz = e.homeZ + (Math.random() - .5) * 8; }
     if (e.fleeT > 0) { e.fleeT -= dt; moveEntity(G, e, e.x - p.x, e.z - p.z, dt * 1.6); }
     else if (e.wx != null && dist(e, { x: e.wx, z: e.wz }) > .5) moveEntity(G, e, e.wx - e.x, e.wz - e.z, dt * .5);

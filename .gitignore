@@ -3,3 +3,4 @@ server.log
 shots/
 *.log
 .mimosa/
+assets/raw/

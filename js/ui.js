@@ -53,6 +53,9 @@ export class UI {
       <div id="hud-time" class="card"></div>
       <div id="hud-right">
         <div class="card row"><span id="hud-coins"></span><span id="hud-town"></span></div>
+        <div class="row2">
+          <button id="btn-home" class="chip-btn" title="回到小镇中心（H键，战斗中不可用）">🏠 回城</button>
+        </div>
         <canvas id="minimap" width="120" height="120"></canvas>
         <div class="zoom-row"><button id="zoom-out">－</button><button id="zoom-in">＋</button></div>
       </div>
@@ -80,6 +83,8 @@ export class UI {
     document.getElementById('menu-bar').querySelectorAll('button').forEach(b => b.onclick = () => this.openPanel(b.dataset.p));
     document.getElementById('zoom-in').onclick = () => { this.R.zoom = Math.min(1.6, this.R.zoom * 1.2); };
     document.getElementById('zoom-out').onclick = () => { this.R.zoom = Math.max(.55, this.R.zoom / 1.2); };
+    document.getElementById('btn-home').onclick = () => { if (this.G) this.G.homeTp(); };
+    document.getElementById('minimap').onclick = () => { this.openPanel('map'); this.renderBigMap(); };
     // 触屏
     const btnA = document.getElementById('btn-attack');
     btnA.addEventListener('pointerdown', e => { e.preventDefault(); this.G.attackHold = true; });
@@ -106,6 +111,107 @@ export class UI {
     if (len > max) { dx = dx / len * max; dy = dy / len * max; }
     knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
     this.G.joy = len > 8 ? { x: dx / max, y: dy / max } : null;
+  }
+
+  // ---------------- 新手引导 ----------------
+  tutorial = null;
+  tutStep = 0;
+  TUT_STEPS = [
+    { id: 'move', icon: '👣', n: '学会移动', tip: '用 <b>WASD/方向键</b> 或<b>左侧摇杆</b>四处走走，熟悉一下你的营地', done: G => (G.movedDist || 0) > 6 },
+    { id: 'wood', icon: '🪵', n: '收集木头', tip: '走到一棵<b>树</b>旁边，按 <b>E</b> 或点 <b>✋互动键</b> 采集，收集 <b>8 块木头</b>', done: G => G.count('wood') + (G.stats.gather_wood || 0) >= 8 || (G.buildCounts.campfire || 0) > 0, arrow: 'tree' },
+    { id: 'stone', icon: '🪨', n: '收集石头', tip: '找一块<b>岩石</b>采起来，收集 <b>5 块石头</b>（灰色的大石头）', done: G => G.count('stone') + (G.stats.gather_stone || 0) >= 5 || (G.buildCounts.campfire || 0) > 0, arrow: 'rock' },
+    { id: 'campfire', icon: '🔥', n: '点燃篝火', tip: '点右侧 <b>🔨建造</b> 按钮 → 选<b>篝火</b> → 点击身边空地放置。<br>篝火能照明取暖，是小镇的起点！', done: G => (G.buildCounts.campfire || 0) >= 1, glow: 'build' },
+    { id: 'tool', icon: '🪓', n: '制作工具', tip: '点 <b>⚒️制作</b> → 制作<b>木斧</b>和<b>木镐</b>（各需3木头2纤维，草丛可采纤维）', done: G => (G.stats.craft_axe_wood || 0) >= 1 && (G.stats.craft_pick_wood || 0) >= 1, glow: 'craft' },
+    { id: 'eat', icon: '🍎', n: '吃点东西', tip: '采集<b>浆果丛</b>（紫色果子的灌木）获得浆果，在<b>🎒背包</b>里点击吃掉，别让自己饿着', done: G => (G.stats.eat || 0) >= 1, glow: 'inventory' },
+    { id: 'night', icon: '🌙', n: '度过一夜', tip: '天黑后怪物会出没！手里拿好武器（木棍也行），靠近怪物按 <b>J/空格</b> 攻击。<br>生命危险时按 <b>🏠回城</b> 躲回营地！', done: G => G.day >= 2 || (G.stats.night_kills || 0) >= 1 },
+    { id: 'farm', icon: '🌱', n: '开垦农田', tip: '建造<b>农田</b>后走近它按互动即可播种。收获的作物能做料理、招商人', done: G => (G.buildCounts.plot_farm || 0) >= 1, glow: 'build' },
+    { id: 'recruit', icon: '🧑‍🤝‍🧑', n: '招募居民', tip: '跟着屏幕上的<b>指引箭头</b>去找地图上的幸存者营地，对话后带 TA 回小镇！', done: G => (G.stats.recruit || 0) >= 1, arrow: 'survivor' },
+    { id: 'end', icon: '🏆', n: '交给你了！', tip: '基础都学会了！接下来跟着<b>左上角的主线任务</b>一路发展：<br>围墙防御 → 招贤纳士 → 箭塔守家 → 挑战四大Boss → 传奇小镇！', done: () => false, last: true },
+  ];
+  startTutorial() {
+    const seen = localStorage.getItem('xh_tut_v2');
+    if (seen) { this.tutorial = null; return; }
+    this.tutorial = true; this.tutStep = 0;
+    this.renderTutCard();
+  }
+  skipTutorial() {
+    this.tutorial = null;
+    localStorage.setItem('xh_tut_v2', '1');
+    const el = document.getElementById('tutorial');
+    if (el) el.style.display = 'none';
+    this.G && (this.G.guideArrow = null);
+    this.clearGlow();
+    this.toast('📋 跟着左上角主线任务走即可，加油！');
+  }
+  clearGlow() {
+    document.querySelectorAll('#menu-bar button').forEach(b => b.classList.remove('tut-glow'));
+  }
+  renderTutCard() {
+    const step = this.TUT_STEPS[this.tutStep];
+    if (!step) { this.skipTutorial(); return; }
+    const el = document.getElementById('tutorial');
+    el.style.display = '';
+    el.innerHTML = `<div class="tut-card card">
+      <div class="tut-step">新手引导 ${this.tutStep + 1}/${this.TUT_STEPS.length}</div>
+      <b>${step.icon} ${step.n}</b>
+      <p>${step.tip}</p>
+      <div class="tut-actions">
+        ${step.last ? `<button class="btn-jelly" id="tut-ok">开始拓荒！</button>`
+        : `<button class="btn-jelly" id="tut-ok">知道了</button><button class="btn-jelly" id="tut-skip" style="background:linear-gradient(180deg,#EEF2F6,#D9E1E9);box-shadow:0 3px 0 #AAB6C2;color:#5C6470">跳过引导</button>`}
+      </div>
+    </div>`;
+    document.getElementById('tut-ok').onclick = () => { this.dismissTutCard(); };
+    const skip = document.getElementById('tut-skip');
+    if (skip) skip.onclick = () => this.skipTutorial();
+    // 高亮目标UI按钮
+    this.clearGlow();
+    if (step.glow) {
+      const btn = document.querySelector(`#menu-bar button[data-p="${step.glow}"]`);
+      if (btn) btn.classList.add('tut-glow');
+    }
+  }
+  dismissTutCard() {
+    const el = document.getElementById('tutorial');
+    el.style.display = 'none';
+    // 非最后步：等条件达成自动前进（卡片隐藏期间也检测）
+  }
+  updateTutorial(dt) {
+    if (!this.tutorial) return;
+    const G = this.G;
+    const step = this.TUT_STEPS[this.tutStep];
+    if (!step) { this.skipTutorial(); return; }
+    // 条件达成 → 下一步（最后一步由按钮结束）
+    if (!step.last && step.done(G)) {
+      this.tutStep++;
+      G.sfx('quest');
+      this.renderTutCard();
+      return;
+    }
+    // 指引箭头
+    G.guideArrow = null;
+    if (step.arrow === 'tree' || step.arrow === 'rock') {
+      const t = this.findNearestObj(step.arrow === 'tree' ? ['tree', 'tree_pine', 'tree_big', 'apple_tree'] : ['rock', 'rock_sand', 'ore_copper', 'ore_coal']);
+      if (t) G.guideArrow = { x: t.x, z: t.z, label: step.arrow === 'tree' ? '树木 🪓' : '岩石 ⛏️' };
+    }
+    if (step.arrow === 'survivor') {
+      const p = G.pois.find(x => x.type === 'survivor' && !x.rescued);
+      if (p) G.guideArrow = { x: p.x + .5, z: p.z + .5, label: '幸存者 🧑' };
+    }
+  }
+  findNearestObj(ids) {
+    const G = this.G, p = G.player;
+    let best = null, bd = 46;
+    const tx = Math.floor(p.x), tz = Math.floor(p.z);
+    for (let dz = -24; dz <= 24; dz += 1) for (let dx = -24; dx <= 24; dx += 1) {
+      const x = tx + dx, z = tz + dz;
+      if (!G.q.inBounds(x, z)) continue;
+      const o = G.world.obj[z * G.world.W + x];
+      if (o && ids.includes(o.id)) {
+        const d = Math.hypot(x + .5 - p.x, z + .5 - p.z);
+        if (d < bd) { bd = d; best = { x: x + .5, z: z + .5 }; }
+      }
+    }
+    return best;
   }
 
   // ---------------- Toast ----------------
@@ -163,9 +269,32 @@ export class UI {
       $('fishing-state').textContent = fish.state === 'bite' ? '咬钩了！快点击收杆/按F！' : fish.state === 'miss' ? '跑掉了……' : '耐心等待……';
       document.getElementById('btn-fish').style.display = fish.state === 'bite' ? '' : 'none';
     } else { $('fishing-tip').style.display = 'none'; document.getElementById('btn-fish').style.display = 'none'; }
-    // 互动按钮标签
+    // 互动按钮标签 + 高亮
     const label = G.target ? G.labelForTarget(G.target).split('（')[0] : '';
+    const iBtn = document.getElementById('btn-interact');
     document.getElementById('interact-label').textContent = label || '互动';
+    if (iBtn) iBtn.classList.toggle('pulse', !!G.target);
+    // 回城按钮冷却
+    const homeBtn = document.getElementById('btn-home');
+    if (homeBtn) {
+      homeBtn.classList.toggle('cd', G.homeCd > 0);
+      homeBtn.textContent = G.homeCd > 0 ? `🏠 ${Math.ceil(G.homeCd)}s` : '🏠 回城';
+    }
+    // 菜单红点：任务可领 / 技能点
+    const mq2 = G.mainQuest();
+    const questReady = mq2 && G.questReady(mq2);
+    const dailyReady = G.dailies.some(q => G.dailyProgress(q) >= q.goals[0].n);
+    const sideReady = SIDE_QUESTS.some(q => G.questReady(q) && !G.claimedSides.includes(q.id));
+    const dots = {
+      quests: questReady || dailyReady || sideReady ? '!' : '',
+      settings: p.skillPts > 0 ? '✦' : '',
+    };
+    document.querySelectorAll('#menu-bar button').forEach(b => {
+      const d = dots[b.dataset.p] || '';
+      let dotEl = b.querySelector('.dot');
+      if (d && !dotEl) { dotEl = document.createElement('i'); dotEl.className = 'dot'; b.appendChild(dotEl); }
+      if (dotEl) { if (d) { dotEl.style.display = ''; dotEl.textContent = d; } else dotEl.style.display = 'none'; }
+    });
     // 小地图
     const mm = document.getElementById('minimap');
     if (mm) { this.R.mmDirty = this.R.mmDirty || G.time - (this._mmT || 0) > 1; if (G.time - (this._mmT || 0) > 1) { this._mmT = G.time; } this.R.renderMinimap(mm.getContext('2d'), 120, G); }
@@ -245,6 +374,7 @@ export class UI {
           case 'sell': G.sellItem(a1, +a2 || 1); break;
           case 'sellall': G.sellItem(a1, G.count(a1)); break;
           case 'buy': G.buyItem(a1, 1); break;
+          case 'buy5': G.buyItem(a1, 5); break;
           case 'take': { const s = G.town.storage[+a1]; if (s && G.give(s.id, s.n)) G.town.storage[+a1] = null; break; }
           case 'takeall': { for (let i = 0; i < G.town.storage.length; i++) { const s = G.town.storage[i]; if (s && G.give(s.id, s.n)) G.town.storage[i] = null; } break; }
           case 'store': { const s = G.player.inv[+a1]; if (s && G.addStorage(s.id, s.n)) G.take(s.id, s.n); break; }
@@ -255,7 +385,9 @@ export class UI {
           case 'import': { const t = prompt('粘贴存档数据：'); if (t) { try { JSON.parse(t); localStorage.setItem(CONFIG.SAVE_KEY, t); location.reload(); } catch (e) { alert('存档数据无效'); } } break; }
           case 'save': G.save(); break;
           case 'sfx': G.settings.sfx = !G.settings.sfx; break;
-          case 'tut': this.showTutorial(true); break;
+          case 'autoatk': G.settings.autoAtk = !G.settings.autoAtk; G.toast(G.settings.autoAtk ? '⚔️ 自动攻击已开启（怪物靠近自动挥击）' : '自动攻击已关闭'); break;
+          case 'dmgnum': G.settings.dmgNum = !G.settings.dmgNum; break;
+          case 'tut': localStorage.removeItem('xh_tut_v2'); this.closePanel(); this.tutorial = true; this.tutStep = 0; this.renderTutCard(); break;
           case 'recruitw': { if (G.town.wandererWaiting && G.player.coins >= 80) { G.player.coins -= 80; G.town.wandererWaiting = false; G.addSettler(G.randomName()); } break; }
           case 'fishguide': break;
         }
@@ -466,16 +598,27 @@ export class UI {
   htmlSettings() {
     const G = this.G;
     return `
-      <button class="craft-btn" data-act="sfx">🔔 音效：${G.settings.sfx ? '开' : '关'}</button>
-      <button class="craft-btn" data-act="save">💾 立即保存</button>
-      <button class="craft-btn" data-act="export">📤 导出存档</button>
-      <button class="craft-btn" data-act="import">📥 导入存档</button>
-      <button class="craft-btn danger" data-act="wipe">🗑️ 删除存档重开</button>
-      <button class="craft-btn" data-act="tut">❓ 操作教程</button>
+      <div class="set-row">
+        <button class="craft-btn" data-act="sfx">🔔 音效：${G.settings.sfx ? '开' : '关'}</button>
+        <button class="craft-btn" data-act="autoatk">⚔️ 自动攻击：${G.settings.autoAtk ? '开' : '关'}</button>
+      </div>
+      <div class="set-row">
+        <button class="craft-btn" data-act="dmgnum">💥 伤害数字：${G.settings.dmgNum ? '开' : '关'}</button>
+        <button class="craft-btn" data-act="save">💾 立即保存</button>
+      </div>
+      <div class="set-row">
+        <button class="craft-btn" data-act="export">📤 导出存档</button>
+        <button class="craft-btn" data-act="import">📥 导入存档</button>
+      </div>
+      <div class="set-row">
+        <button class="craft-btn danger" data-act="wipe">🗑️ 删除存档重开</button>
+        <button class="craft-btn" data-act="tut">🎓 重新看新手引导</button>
+      </div>
       <div class="help-block">
-        <b>键盘：</b>WASD/方向键移动 · J或空格攻击 · E互动 · F钓鱼收杆 · B建造 · I背包 · C制作 · M地图 · 1-8快捷栏 · 滚轮缩放 · Esc关闭<br>
-        <b>触屏：</b>左侧摇杆移动 · ⚔️按住连续攻击 · ✋互动/采集/钓鱼<br>
-        <b>新手流程：</b>采资源→篝火→工具→工作台→围墙→农田→招募→防御塔→击败哥布林王→繁荣小镇→挑战三大Boss→远古祭坛终局
+        <b>🎯 快速上手：</b>跟着左上角主线任务走。白天采集建造，天黑怪物出没注意战斗或回城躲避。<br>
+        <b>⌨️ 键盘：</b>WASD移动 · J/空格攻击 · E互动采集 · F钓鱼收杆 · H回城 · B建造 · I背包 · C制作 · Q任务 · M地图 · 1-8快捷栏 · 滚轮缩放 · Esc关闭<br>
+        <b>📱 触屏：</b>左摇杆移动 · ⚔️按住连击 · ✋互动采集钓鱼（有目标时按钮会发光）<br>
+        <b>💡 进阶：</b>怪物靠近会自动攻击（可关）；击杀3只内连杀有金币奖励；肉 attracted 商队每3天来访；四季影响作物与温度；祭坛可召唤Boss
       </div>`;
   }
   htmlTrade() {
@@ -484,8 +627,9 @@ export class UI {
     let buy = '';
     for (const [id, price] of MERCHANT.sell) {
       buy += `<div class="recipe-row"><div class="r-ico"><img src="${this.iconURL(id)}"></div>
-        <div class="r-main"><b>${ITEMS[id].n}</b><div class="mats"><span class="lack">🪙${price}</span></div></div>
-        <button class="craft-btn ${G.player.coins >= price ? '' : 'dis'}" data-act="buy" data-a1="${id}">买1</button></div>`;
+        <div class="r-main"><b>${ITEMS[id].n}</b><div class="mats"><span class="lack">单价🪙${price}</span></div></div>
+        <button class="craft-btn ${G.player.coins >= price ? '' : 'dis'}" data-act="buy" data-a1="${id}">买1</button>
+        <button class="craft-btn ${G.player.coins >= price * 5 ? '' : 'dis'}" data-act="buy5" data-a1="${id}">买5</button></div>`;
     }
     // 出售：聚合背包
     const agg = {};
@@ -516,23 +660,6 @@ export class UI {
       if (p.type === 'meteor') { ctx.fillStyle = '#3cd8e8'; ctx.fillText('陨星', p.x * sc - 11, p.z * sc - 5); }
     }
     ctx.fillStyle = '#e05c5c'; ctx.fillText('🏠', G.townCenter.x * sc - 6, G.townCenter.z * sc - 6);
-  }
-
-  showTutorial(force) {
-    const seen = localStorage.getItem('xh_tut') && !force;
-    if (seen) return;
-    localStorage.setItem('xh_tut', '1');
-    const el = document.getElementById('tutorial');
-    el.style.display = '';
-    el.innerHTML = `<div class="card tut-card">
-      <b>🌟 欢迎来到星火小镇！</b>
-      <p>你是一位拓荒者，要在这片怪物横行的荒谷建起繁荣小镇。</p>
-      <p>👣 <b>移动</b>：WASD / 左侧摇杆 · <b>采集</b>：靠近树/石头按 E 或 ✋</p>
-      <p>🔥 先收集 8 木头 5 石头，点燃<b>篝火</b>（菜单-建造）！夜晚会有怪物出没，白天赶紧行动。</p>
-      <p>📜 左上角的任务指引会一路带你从营地走到传奇小镇。</p>
-      <button id="tut-ok">开始拓荒！</button>
-    </div>`;
-    document.getElementById('tut-ok').onclick = () => { el.style.display = 'none'; };
   }
 }
 

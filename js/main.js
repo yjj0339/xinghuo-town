@@ -1,11 +1,12 @@
 // ============================================================
-// 装配：输入 / 主循环 / 音效合成 / 标题页 / 存档接线
+// 装配 v2：资产加载 / 输入 / 主循环 / 音效 / 教程 / 标题页
 // ============================================================
 import { CONFIG, ITEMS, RECIPES } from './data.js';
 import { Game } from './systems.js';
 import { Renderer } from './render.js';
 import { UI } from './ui.js';
-import { moveEntity, playerAttack, bestTool } from './entities.js';
+import { moveEntity, playerAttack, bestTool, dist } from './entities.js';
+import { loadAssets } from './assets.js';
 
 // ---------------- 音效（WebAudio 轻量合成） ----------------
 class Sfx {
@@ -58,6 +59,7 @@ class Sfx {
       case 'thunder': this.noise(.6, .22, 100); break;
       case 'equip': this.beep(440, .06, 'square', .08); break;
       case 'chest': [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => this.beep(f, .1, 'square', .09), i * 70)); break;
+      case 'combo': [784, 988, 1175].forEach((f, i) => setTimeout(() => this.beep(f, .09, 'square', .1), i * 60)); break;
       default: this.beep(440, .06, 'square', .06);
     }
   }
@@ -69,14 +71,13 @@ const renderer = new Renderer(canvas);
 const ui = new UI(null, renderer);
 window.__ui = ui;
 const sfx = new Sfx();
-
 let G = null;
 
 function newGame(seed) {
   G = new Game(seed ?? (Date.now() & 0xffff));
   wire();
   startLoop();
-  ui.showTutorial();
+  ui.startTutorial();
 }
 function continueGame() {
   const d = Game.load();
@@ -89,12 +90,11 @@ function continueGame() {
 }
 function wire() {
   ui.G = G;
-  window.__G = G; // 无头测试钩子
+  window.__G = G;
   G.toastFn = m => ui.toast(m);
   G.sfxFn = n => sfx.play(n);
   G.openPanel = n => ui.openPanel(n);
   G.openStation = st => { ui.craftTab = st; ui.openPanel('craft'); };
-  // 初始镜头
   renderer.cam.x = G.player.x; renderer.cam.z = G.player.z;
 }
 
@@ -107,6 +107,7 @@ window.addEventListener('keydown', e => {
   if (!G) return;
   if (k === 'e') G.interactPress = true;
   if (k === 'f') G.fishingPull();
+  if (k === 'h') G.homeTp();
   if (k === 'j' || k === ' ') { e.preventDefault(); playerAttack(G, G.player); }
   if (k === 'b') ui.openPanel('build');
   if (k === 'i') ui.openPanel('inventory');
@@ -118,7 +119,6 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
-// 指针：建造落位 / 缩放
 let pointerPos = null;
 canvas.addEventListener('pointermove', e => { pointerPos = { x: e.offsetX, y: e.offsetY }; });
 canvas.addEventListener('pointerdown', e => {
@@ -128,18 +128,17 @@ canvas.addEventListener('pointerdown', e => {
   const tx = Math.floor(wpos.x), tz = Math.floor(wpos.z);
   if (ui.dismantleMode) {
     const b = G.buildingAt(tx, tz);
-    if (b) { G.dismantle(b); }
+    if (b) G.dismantle(b);
     return;
   }
   if (ui.buildSel) {
     if (G.placeBuilding(ui.buildSel, tx, tz)) {
-      if (!G.canAfford(ui.buildSel) || !e.shiftKey) { if (!G.canAfford(ui.buildSel)) ui.cancelBuild(); }
+      if (!G.canAfford(ui.buildSel)) ui.cancelBuild();
     } else G.toast('无法放置到这里');
     return;
   }
-  // 点击攻击（点在怪物附近）
   let hitM = null;
-  for (const m of G.entities) if (m.kind === 'monster' && Math.hypot(m.x - wpos.x, m.z - wpos.z) < 1.2) { hitM = m; break; }
+  for (const m of G.entities) if (m.kind === 'monster' && Math.hypot(m.x - wpos.x, m.z - wpos.z) < 1.3) { hitM = m; break; }
   if (hitM) {
     const p = G.player;
     p.dir = Math.abs(hitM.x - p.x) > Math.abs(hitM.z - p.z) * 2 ? (hitM.x > p.x ? 2 : 1) : (hitM.z > p.z ? 0 : 3);
@@ -170,13 +169,12 @@ function startLoop() {
   lastT = performance.now();
   requestAnimationFrame(tick);
 }
-let targT = 0;
+let targT = 0, movedDist = 0, lastPX = 0, lastPZ = 0;
 function tick(now) {
   requestAnimationFrame(tick);
   const dt = Math.min(.05, (now - lastT) / 1000);
   lastT = now;
   if (!G) return;
-  // —— 玩家移动 ——
   const p = G.player;
   let mx = 0, mz = 0;
   if (keys['w'] || keys['arrowup']) mz -= 1;
@@ -185,42 +183,54 @@ function tick(now) {
   if (keys['d'] || keys['arrowright']) mx += 1;
   if (G.joy) { mx = G.joy.x; mz = G.joy.y; }
   if ((mx || mz) && !p.dead) {
-    if (p.fishing) { p.fishing = null; }
+    if (p.fishing) p.fishing = null;
     moveEntity(G, p, mx, mz, dt);
+    movedDist += Math.hypot(p.x - lastPX, p.z - lastPZ);
   } else p.moving = false;
-  // 连续攻击（按住）
+  lastPX = p.x; lastPZ = p.z;
+  G.movedDist = movedDist;
   if (G.attackHold) playerAttack(G, p);
-  // 交互
+  // 自动攻击（设置开启 + 附近有怪 + 玩家未在移动）
+  if (G.settings.autoAtk && !p.moving && p.atkCd <= 0 && !p.dead) {
+    let tgt = null, bd = 2.2;
+    for (const m of G.entities) if (m.kind === 'monster' && !MON_PASSIVE(m)) { const d = dist(m, p); if (d < bd) { bd = d; tgt = m; } }
+    if (tgt) {
+      p.dir = Math.abs(tgt.x - p.x) > Math.abs(tgt.z - p.z) * 2 ? (tgt.x > p.x ? 2 : 1) : (tgt.z > p.z ? 0 : 3);
+      playerAttack(G, p);
+    }
+  }
   if (G.interactPress) { G.interactPress = false; G.interact(); }
-  // 钓鱼面向水自动开始（E 在水边且持竿）
-  // 目标指示
   targT -= dt;
   if (targT <= 0) { targT = .15; G.target = G.interactTarget(); }
-  // 建造虚影
   if (ui.buildSel) {
     const base = pointerPos ? screenToWorld(pointerPos.x, pointerPos.y) : p;
     let tx = Math.floor(base.x), tz = Math.floor(base.z);
-    if (!pointerPos) { // 无鼠标（触屏）：放面前
+    if (!pointerPos) {
       const dirs = [[0, 1], [-1, 0], [1, 0], [0, -1]];
       tx = Math.floor(p.x + dirs[p.dir][0] * 1.5); tz = Math.floor(p.z + dirs[p.dir][1] * 1.5);
     }
     G.ghost = { id: ui.buildSel, x: tx, z: tz, ok: G.canPlace(ui.buildSel, tx, tz) };
   } else G.ghost = null;
-  // —— 系统更新 ——
+  // 教程指引
+  if (ui.tutorial) ui.updateTutorial(dt);
   G.update(dt);
-  // 镜头跟随
+  // Boss 出场震屏
+  const boss = G.entities.find(e => e.boss);
+  if (boss && !G._bossSeen) { G._bossSeen = true; renderer.shake = 1; }
+  if (!boss) G._bossSeen = false;
+  // 玩家受击轻微震屏
+  if (p.hitT > .15 && !G._hurtShake) { G._hurtShake = true; renderer.shake = Math.max(renderer.shake, .25); }
+  if (p.hitT <= 0) G._hurtShake = false;
   renderer.cam.x += (p.x - renderer.cam.x) * Math.min(1, dt * 6);
   renderer.cam.z += (p.z - renderer.cam.z) * Math.min(1, dt * 6);
-  // —— 渲染 ——
   renderer.render(G);
-  // 粒子（世界层简单绘制：交给 floaters 已够用，此略）
   ui.update(dt);
   if (ui.activePanel === 'map') ui.renderBigMap();
 }
+function MON_PASSIVE(m) { return m.type === 'rabbit_mob'; }
 
 // ---------------- 标题页 ----------------
 function showTitle() {
-  // 自动直进模式（冒烟测试/分享直达）：?auto=1
   const params = new URLSearchParams(location.search);
   if (params.get('auto')) { document.getElementById('title').style.display = 'none'; newGame(); return; }
   if (params.get('test')) { document.getElementById('title').style.display = 'none'; newGame(params.get('seed') ? +params.get('seed') : undefined); runSmokeTest(params.get('test')); return; }
@@ -230,7 +240,7 @@ function showTitle() {
   el.innerHTML = `<div class="title-card">
     <h1>星火小镇</h1>
     <p class="sub">荒谷拓荒记 · 2.5D 开放世界生存经营</p>
-    <div class="title-feats">🌲 六大生态区 · 🏛️ 经营建镇 · ⚔️ 怪物夜袭<br>🌾 四季农牧 · 🎣 钓鱼 · 👹 四大Boss · 📜 任务成就图鉴</div>
+    <div class="title-feats">🌲 六大生态区 · 🏛️ 经营建镇 · ⚔️ 怪物夜袭<br>🌾 四季农牧 · 🎣 钓鱼 · 👹 四大Boss · 📜 任务成就图鉴<br>✨ 全新手绘卡通画面 · 新手引导手把手教学</div>
     ${hasSave ? `<button id="btn-continue">▶ 继续拓荒</button><button id="btn-new" class="ghost-btn">🌱 新的开始</button>`
       : `<button id="btn-start">🔥 点燃篝火，开始拓荒</button>`}
   </div>`;
@@ -242,14 +252,7 @@ function showTitle() {
   };
 }
 
-window.addEventListener('resize', () => renderer.resize());
-document.addEventListener('visibilitychange', () => { if (document.hidden && G) G.save(true); });
-window.addEventListener('beforeunload', () => { if (G) G.save(true); });
-
-ui.init();
-showTitle();
-
-// ---------------- 冒烟测试钩子（?test=xxx） ----------------
+// ---------------- 冒烟测试钩子 ----------------
 function runSmokeTest(mode) {
   const results = { errors: [], steps: [] };
   window.__smoke = results;
@@ -259,13 +262,12 @@ function runSmokeTest(mode) {
   };
   window.addEventListener('error', e => results.errors.push('全局: ' + e.message));
   if (mode === 'panels') {
-    // 跑几帧让世界稳定
     let n = 0;
     const tickN = setInterval(() => {
       n++;
       if (n === 10) {
         for (const p of ['inventory', 'craft', 'build', 'quests', 'town', 'codex', 'ach', 'map', 'settings', 'trade']) {
-          step('打开面板 ' + p, () => { ui.openPanel(p); ui.renderBigMap && p === 'map' && ui.renderBigMap(); });
+          step('打开面板 ' + p, () => { ui.openPanel(p); if (p === 'map') ui.renderBigMap(); });
         }
         step('关闭面板', () => ui.closePanel());
         clearInterval(tickN);
@@ -273,20 +275,45 @@ function runSmokeTest(mode) {
     }, 100);
   }
   if (mode === 'play') {
-    // 玩法链：给材料→合成→建造→互动→钓鱼状态→夜袭
     setTimeout(() => {
       step('给予材料', () => { G.give('wood', 20); G.give('stone', 20); G.give('fiber', 10); });
       step('合成木斧', () => { if (!G.craft(RECIPES.find(r => r.out[0] === 'axe_wood'))) throw new Error('craft fail'); });
       step('放置篝火', () => { if (!G.placeBuilding('campfire', Math.floor(G.player.x) + 2, Math.floor(G.player.z))) throw new Error('place fail'); });
       step('装备武器', () => G.equip('stick'));
-      step('打开建造菜单', () => ui.openPanel('build'));
       step('夜袭', () => { G.day = 4; G.town.raidTonight = false; G.startRaid(); });
       step('存档', () => G.save(true));
       step('读档回路', () => { const d = JSON.parse(localStorage.getItem(CONFIG.SAVE_KEY)); if (!d) throw new Error('no save'); });
-    }, 1200);
+      step('回城', () => { G.homeCd = 0; G.homeTp(); });
+    }, 1400);
   }
-  // 结果写入 <title> 供无头 dump-dom 读取
   setTimeout(() => {
     document.title = 'SMOKE ' + JSON.stringify({ s: results.steps, e: results.errors });
-  }, 3600);
+  }, 3800);
 }
+
+// ---------------- 资产加载 → 标题 ----------------
+async function boot() {
+  const bar = document.querySelector('#load-bar i');
+  const txt = document.getElementById('load-txt');
+  let ids = [];
+  try {
+    const r = await fetch('assets/spr/list.json');
+    ids = await r.json();
+  } catch (e) { console.warn('资产清单缺失，使用程序化绘制'); }
+  await loadAssets(ids, (done, total) => {
+    const pct = Math.round(done / total * 100);
+    if (bar) bar.style.width = pct + '%';
+    if (txt) txt.textContent = `正在唤醒荒谷居民… ${pct}%`;
+  });
+  const loading = document.getElementById('loading');
+  loading.style.opacity = '0';
+  setTimeout(() => loading.style.display = 'none', 500);
+  showTitle();
+}
+
+window.addEventListener('resize', () => renderer.resize());
+document.addEventListener('visibilitychange', () => { if (document.hidden && G) G.save(true); });
+window.addEventListener('beforeunload', () => { if (G) G.save(true); });
+
+ui.init();
+boot();

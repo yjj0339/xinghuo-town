@@ -24,7 +24,7 @@ export const BIOMES = {
   desert:  { n: '金沙荒漠', g: ['#e8d08a', '#e2c87e', '#eeda96'], temp: 12,  mon: ['scorpion', 'mummy', 'sandworm'] },
   snow:    { n: '霜语雪原', g: ['#e9f2f6', '#dfeaf1', '#f2f9fc'], temp: -16, mon: ['slime_ice', 'wolf_snow', 'yeti', 'banshee'] },
   swamp:   { n: '幽泽湿地', g: ['#7a9b5e', '#709154', '#84a668'], temp: 2,   mon: ['mush_toxic', 'spider', 'croc', 'bog_lurker'] },
-  volcano: { n: '烬岩火山', g: ['#6b5a56', '#615250', '#75645f'], temp: 22,  mon: ['bat_fire', 'slime_lava', 'demon_imp', 'demon_lava'] },
+  volcano: { n: '烬岩火山', g: ['#6b5a56', '#615250', '#75645f'], temp: 22,  mon: ['bat_fire', 'slime_lava', 'demon_imp', 'demon_lava', 'dragon_whelp'] },
   water:   { n: '碧波',     g: ['#5fb7d4', '#57aecd', '#69c1dc'], temp: 0,   mon: [] },
   sand:    { n: '河岸',     g: ['#ecd9a4', '#e6d298', '#f2e0ae'], temp: 6,   mon: [] },
 };
@@ -299,6 +299,8 @@ export const BUILDINGS = {
   bench_park: { n: '长椅', cat: 'deco', cost: [['plank', 3]], hp: 80, deco: 1, d: '坐下来歇歇脚' },
   fountain:   { n: '喷泉', cat: 'deco', cost: [['stone', 12], ['bar_copper', 2], ['gear', 1]], hp: 400, deco: 5, unlock: 'town3', d: '小镇的骄傲，大幅提升幸福感' },
   statue_hero:{ n: '英雄雕像', cat: 'deco', cost: [['stone', 16], ['bar_gold', 2]], hp: 600, deco: 6, unlock: 'quest:m11', d: '纪念拓荒者的丰碑' },
+  banner_star:{ n: '星火旗帜', cat: 'deco', cost: [['plank', 2], ['cloth', 2]], hp: 100, deco: 3, d: '迎风飘扬的小镇旗帜' },
+  fire_bowl:  { n: '装饰火盆', cat: 'deco', cost: [['stone', 6], ['coal', 2]], hp: 150, light: 4, deco: 2, d: '温暖的石雕火盆' },
   altar_ancient:{ n: '远古祭坛', cat: 'special', cost: [['trophy_goblin', 1], ['trophy_ice', 1], ['trophy_flame', 1], ['bar_gold', 5], ['crystal', 5]], hp: 999, unlock: 'quest:m13', d: '献上三大Boss战利品，召唤最终试炼' },
 };
 
@@ -339,6 +341,10 @@ export const MONSTERS = {
   skeleton:   { n: '骷髅',     tier: 2, hp: 65,  dmg: 13, spd: 1.9, aggro: 5.5, xp: 22, night: true, drops: [['bone', 1, 3, 1], ['coin', 3, 8, .4]] },
   zombie:     { n: '僵尸',     tier: 1, hp: 50,  dmg: 10, spd: 1.2, aggro: 5, xp: 14, night: true, drops: [['fiber', 1, 2, .5], ['coin', 1, 4, .3]] },
   shadow:     { n: '暗影',     tier: 3, hp: 80,  dmg: 16, spd: 2.8, aggro: 7, xp: 36, night: true, special: 'teleport', drops: [['essence_dark', 1, 1, .5]] },
+  dragon_whelp:{ n: '火焰幼龙', tier: 4, hp: 190, dmg: 24, spd: 2.4, aggro: 8, ranged: 6, fly: true, burn: true, xp: 80,
+                drops: [['essence_fire', 1, 2, .7], ['obsidian', 1, 2, .5], ['ore_gold', 1, 1, .15]] },
+  gold_goblin:{ n: '宝藏地精', tier: 2, hp: 60,  dmg: 8,  spd: 3.4, aggro: 0, xp: 60, passive: true, special: 'flee',
+                drops: [['coin', 30, 80, 1], ['map_treasure', 1, 1, .15]] },
   // —— Boss
   goblin_king:{ n: '哥布林王', tier: 5, hp: 700, dmg: 28, spd: 2.0, aggro: 9, xp: 500, boss: true, special: 'summon', size: 1.6,
                 drops: [['trophy_goblin', 1, 1, 1], ['bar_gold', 2, 3, 1], ['badge_goblin', 5, 10, 1]] },
@@ -542,6 +548,8 @@ export const RANDOM_EVENTS = [
   { id: 'e_wanderer', n: '流浪者来访', w: 8, d: '一位流浪者在招贤台前驻足，可以花钱请他留下' },
   { id: 'e_festival', n: '丰收祭',   w: 6,  d: '换季之日，小镇其乐融融，全员幸福+"（自动触发于季节更替）' },
   { id: 'e_mimic',    n: '可疑宝箱', w: 5,  d: '地图上出现了一只神秘的宝箱……真的是宝箱吗？' },
+  { id: 'e_goldrush', n: '淘金热',   w: 5,  d: '山那边发现了新金矿脉，快去地图上找金光标记！' },
+  { id: 'e_greedy',   n: '宝藏地精', w: 6,  d: '一只背着钱袋的宝藏地精出现在小镇附近，抓住它！' },
 ];
 
 // ---------------- 小镇等级 ----------------

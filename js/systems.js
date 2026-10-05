@@ -39,7 +39,7 @@ export class Game {
     this.town = { lv: 1, storage: new Array(20).fill(null), pop: 0, merchant: null, merchantDay: -1, raidTonight: false, raidActive: false, raidPower: 0 };
     this.stats = {}; this.claimedSides = []; this.mainIdx = 0; this.dailies = [];
     this.codex = { monsters: {}, items: {}, fish: {} };
-    this.settings = { sfx: true, dmgNum: true };
+    this.settings = { sfx: true, dmgNum: true, autoAtk: true };
     this.paused = false; this.gameSpeed = 1;
     this.sfxFn = () => { }; this.toastFn = () => { };
     this.spawnT = 0; this.animalT = 0; this.achT = 0; this.autosaveT = 0; this.eventT = 0;
@@ -170,6 +170,16 @@ export class Game {
     this.bus('kill', m.type);
     this.codex.monsters[m.type] = this.codex.monsters[m.type] || { seen: 0, kills: 0 };
     this.codex.monsters[m.type].kills++;
+    // 连击奖励
+    const now = this.time;
+    if (now - (this._comboT || -9) < 3.5) this._combo = (this._combo || 0) + 1; else this._combo = 1;
+    this._comboT = now;
+    if (this._combo >= 3) {
+      const bonus = this._combo * 2;
+      this.player.coins += bonus;
+      this.sfx('combo');
+      this.floaters.push({ x: m.x, z: m.z, y: -64, text: `${this._combo} 连杀！+${bonus}🪙`, color: '#ffd84c', life: 1.4, big: true });
+    }
     const luck = (this.player.equip.acc && ITEMS[this.player.equip.acc]?.arm?.luck) || 0;
     for (const [id, mn, mx, ch] of def.drops) {
       if (this.rng() < ch) {
@@ -373,6 +383,22 @@ export class Game {
     this.sfx('level');
     // 立即生效：体质
     if (id === 'vitality') { p.maxHp += 15; p.hp += 15; }
+    return true;
+  }
+
+  // ---------- 回城 ----------
+  homeCd = 0;
+  homeTp() {
+    const p = this.player;
+    if (this.homeCd > 0) { this.toast(`回城冷却中（${Math.ceil(this.homeCd)}秒）`); return false; }
+    let danger = false;
+    for (const e of this.entities) if (e.kind === 'monster' && !e.passive && dist(e, p) < 6) { danger = true; break; }
+    if (danger) { this.toast('附近有怪物缠着你，无法回城！'); return false; }
+    p.x = this.townCenter.x; p.z = this.townCenter.z;
+    this.homeCd = 30;
+    this.particles.push({ x: p.x, z: p.z, y: -20, t: 0, kind: 'tp' });
+    this.sfx('cast');
+    this.toast('🏠 已回到小镇中心');
     return true;
   }
 
@@ -660,6 +686,30 @@ export class Game {
         this.toast(`📦 ${ev.n}：地图上出现了一只神秘的宝箱……`);
         break;
       }
+      case 'e_goldrush': {
+        let placed = 0;
+        for (let k = 0; k < 300 && placed < 6; k++) {
+          const x = 8 + Math.floor(this.rng() * (this.world.W - 16)), z = 8 + Math.floor(this.rng() * (this.world.H - 16));
+          const i2 = z * this.world.W + x;
+          if (!this.q.isWater(x, z) && !this.world.obj[i2] && Math.hypot(x - tc.x, z - tc.z) > 15) {
+            this.world.obj[i2] = { id: 'ore_gold', hp: 4, t: 0, v: 0 };
+            this.pois.push({ type: 'meteor', n: '金矿', x, z, discovered: true });
+            placed++;
+          }
+        }
+        this.toast(`⛏️ ${ev.n}：小地图出现了 6 处新金矿标记！`);
+        break;
+      }
+      case 'e_greedy': {
+        const ang = this.rng() * Math.PI * 2;
+        const x = tc.x + Math.cos(ang) * 14, z = tc.z + Math.sin(ang) * 14;
+        if (!this.q.isWater(Math.floor(x), Math.floor(z))) {
+          const g = makeMonster('gold_goblin', x, z, {});
+          this.entities.push(g);
+          this.toast(`💰 ${ev.n}：一只宝藏地精出现在小镇附近，快去抓住它（它会逃跑）！`);
+        }
+        break;
+      }
     }
   }
 
@@ -748,6 +798,7 @@ export class Game {
     if (this.paused) return;
     dt *= this.gameSpeed;
     this.time += dt;
+    this.homeCd = Math.max(0, this.homeCd - dt);
     const prevPhase = this.phase;
     // 时间
     this.dayTime += dt / CONFIG.DAY_LEN;
